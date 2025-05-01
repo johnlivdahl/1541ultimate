@@ -21,21 +21,21 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-#include "integer.h"
+#include <stdint.h>
 #include "flash.h"
 #include "indexed_list.h"
 #include "mystring.h"
 
-#define CFG_TYPE_VALUE  0x01
-#define CFG_TYPE_ENUM   0x02
-#define CFG_TYPE_STRING 0x03
-#define CFG_TYPE_FUNC   0x04
-#define CFG_TYPE_SEP    0x05
-#define CFG_TYPE_INFO   0x06
-#define CFG_TYPE_END    0xFF
+#define CFG_TYPE_VALUE   0x01
+#define CFG_TYPE_ENUM    0x02
+#define CFG_TYPE_STRING  0x03
+#define CFG_TYPE_FUNC    0x04
+#define CFG_TYPE_SEP     0x05
+#define CFG_TYPE_INFO    0x06
+#define CFG_TYPE_STRFUNC 0x07
+#define CFG_TYPE_END     0xFF
 
 class UserInterface;
-typedef void (*t_cfg_func)(UserInterface *);
 
 struct t_cfg_definition
 {
@@ -45,14 +45,18 @@ struct t_cfg_definition
     const char *item_format;
     const char **items;
     int  min, max;
-    int  def;
+    long int def; // also used as pointer to default string. For 64 bit systems it needs to be a long!
 };
 
 class ConfigPage;
 class ConfigStore;
 class ConfigurableObject;
 class ConfigItem;
+class Action;
+
 typedef int (*t_change_hook)(ConfigItem *);
+typedef void (*t_cfg_func)(UserInterface *, ConfigItem *);
+typedef void (*t_cfg_strfunc)(ConfigItem *, IndexedList<char *> &strings);
 
 class ConfigSetting
 {
@@ -149,11 +153,12 @@ public:
     ConfigurableObject *get_first_object(void) { return objects[0]; }
 
     ConfigItem *find_item(uint8_t id);
+    ConfigItem *find_item(const char *str);
     int  get_value(uint8_t id);
     const char *get_store_name() { return store_name.c_str(); }
     const char *get_string(uint8_t id);
     void set_value(uint8_t id, int value);
-    void set_string(uint8_t id, char *s);
+    void set_string(uint8_t id, const char *s);
     void dump(void);
     void check_bounds(void);
     bool is_flash_stale(void) { return staleFlash; }
@@ -220,6 +225,7 @@ public:
 	}
     
     ConfigStore *register_store(uint32_t page_id, const char *name, t_cfg_definition *defs, ConfigurableObject *ob);
+    ConfigStore *find_store(const char *storename);
     void add_custom_store(ConfigStore *cfg);
     void remove_store(ConfigStore *cfg);
 

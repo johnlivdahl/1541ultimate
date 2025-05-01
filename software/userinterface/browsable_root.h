@@ -14,38 +14,48 @@
 #include "size_str.h"
 #include "user_file_interaction.h"
 #include "network_interface.h"
+#include "assembly_search.h"
 
 class BrowsableNetwork : public Browsable
 {
-	Browsable *parent;
-	int index;
-public:
-	BrowsableNetwork(Browsable *parent, int index) {
-		this->parent = parent;
-		this->index = index;
-	}
+    Browsable *parent;
+    int index;
 
-	void getDisplayString(char *buffer, int width) {
-		uint8_t mac[6];
-		char ip[16];
+  public:
+    BrowsableNetwork(Browsable *parent, int index)
+    {
+        this->parent = parent;
+        this->index = index;
+    }
 
-		NetworkInterface *ni = NetworkInterface :: getInterface(index);
-		if (!ni) {
-			sprintf(buffer, "Net%d%#s\eJRemoved", index, width-17, "");
-			return;
-		}
-		ni->getMacAddr(mac);
-		if (ni->is_link_up()) {
-			sprintf(buffer, "Net%d    IP: %#s\eELink Up", index, width-21, ni->getIpAddrString(ip, 16));
-		} else {
-			sprintf(buffer, "Net%d    MAC %b:%b:%b:%b:%b:%b%#s\eJLink Down", index, mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], width-38, "");
-		}
-	}
+    void getDisplayString(char *buffer, int width)
+    {
+        NetworkInterface *ni = NetworkInterface ::getInterface(index);
+        if (!ni) {
+            sprintf(buffer, "Net%d%#s\eJRemoved", index, width - 17, "");
+            return;
+        }
+        ni->getDisplayString(index, buffer, width);
+    }
 
-	IndexedList<Browsable *> *getSubItems(int &error) {
-		error = -1;
-		return &children;
-	}
+    IndexedList<Browsable *> *getSubItems(int &error)
+    {
+        NetworkInterface *ni = NetworkInterface ::getInterface(index);
+        if (!ni) {
+            error = -1;
+            return &children;
+        }
+        ni->getSubItems(this, children, error);
+        return &children;
+    }
+
+    void fetch_context_items(IndexedList<Action *> &items)
+    {
+        NetworkInterface *ni = NetworkInterface ::getInterface(index);
+        if (ni) {
+            ni->fetch_context_items(items);
+        }
+    }
 };
 
 class BrowsableDirEntry : public Browsable
@@ -149,22 +159,55 @@ public:
 	    return info->lfname;
 	}
 
-	virtual void getDisplayString(char *buffer, int width) {
+	void squeezeToDisplayString(char *string_to_squeeze, char *squeezed_string, int max_width, int squeeze_quarter = 0) {
+		int len = strlen(string_to_squeeze);
+
+		if (squeeze_quarter < 0 || squeeze_quarter > 3) {
+			squeeze_quarter = 0;
+		}
+
+		if (len <= max_width || max_width <= 10 || squeeze_quarter == 0) {
+			// We can fit into available space or its too short anyways or no squeeze
+			strncpy(squeezed_string, string_to_squeeze, max_width);
+		} else {
+			// Need to squeeze the string
+			int remainder = (max_width * squeeze_quarter) % 4;
+			int cut_off_point = (max_width * squeeze_quarter) / 4; // Where's our cut-off point
+			int tail_length = max_width - cut_off_point; // How much needs to be copied after cut-off
+			strncpy(squeezed_string, string_to_squeeze, cut_off_point); // Copy the beginning
+			strncpy(squeezed_string + cut_off_point, string_to_squeeze + len - tail_length, tail_length); // Copy the end
+
+			squeezed_string[cut_off_point] = '~';
+		}
+	}
+
+	virtual void getDisplayString(char *buffer, int width, int squeeze_option = 0) {
 		static char sizebuf[8];
 		if (info->name_format & NAME_FORMAT_DIRECT) {
 			FileManager::getFileManager()->get_display_string(parent_path, info->lfname, buffer, width);
 		} else {
+			int display_space = width - 11;
+			char tmp_buffer[display_space + 1];
+			memset(tmp_buffer, '\0', display_space * sizeof(char));
+
 			char sel = getSelection() ? '\x13' : ' ';
 			if (info->is_directory()) {
-				sprintf(buffer, "%#s\eJ DIR%c", width - 11, info->lfname, sel);
+				squeezeToDisplayString(info->lfname, tmp_buffer, display_space, squeeze_option);
+				sprintf(buffer, "%#s\eJ DIR%c", display_space, tmp_buffer, sel);
 			} else if (info->attrib & AM_VOL) {
-				sprintf(buffer, "\eR%#s\er VOLUME", width - 11, info->lfname);
+				squeezeToDisplayString(info->lfname, tmp_buffer, display_space, squeeze_option);
+				sprintf(buffer, "\eR%#s\er VOLUME", display_space, tmp_buffer);
 			} else {
 				size_to_string_bytes(info->size, sizebuf);
-				sprintf(buffer, "%#s\e7 %3s%c%s", width - 11, info->lfname,
+				squeezeToDisplayString(info->lfname, tmp_buffer, display_space, squeeze_option);
+				sprintf(buffer, "%#s\e7 %3s%c%s", display_space, tmp_buffer,
 						info->extension, sel, sizebuf);
 			}
 		}
+	}
+
+	virtual void getDisplayString(char *buffer, int width) {
+		getDisplayString(buffer, width, 0);
 	}
 
 	virtual void fetch_context_items(IndexedList<Action *>&items) {

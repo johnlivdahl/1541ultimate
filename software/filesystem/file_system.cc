@@ -68,6 +68,8 @@ const char *FileSystem :: get_error_string(FRESULT res)
 			return "DIRECTORY NOT EMPTY";
 		case FR_LOOP_DETECTED:
 		    return "LOOP DETECTED";
+		case FR_LOCKED:
+		    return "LOCKED";
 		default:
 			return "UNKNOWN ERROR";
 	}
@@ -76,7 +78,6 @@ const char *FileSystem :: get_error_string(FRESULT res)
 
 PathStatus_t FileSystem :: walk_path(PathInfo& pathInfo)
 {
-	//printf("WalkPath: '%s'\n", path);
 	FRESULT fres;
 
 	// example1: /sd/somedir/somefile.d64/hello.prg

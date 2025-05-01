@@ -9,8 +9,9 @@ use work.io_bus_pkg.all;
 
 entity ultimate_mb_700a is
 generic (
-    g_dual_drive    : boolean := false;
-    g_version       : unsigned(7 downto 0) := X"17" );
+    g_acia          : boolean := true;
+    g_eeprom        : boolean := false;
+    g_dual_drive    : boolean := false );
 port (
     CLOCK       : in    std_logic;
     
@@ -78,8 +79,8 @@ port (
     SD_DATA     : inout std_logic_vector(2 downto 1);
     
     -- LED Interface
-    LED_CLK     : out   std_logic;
-    LED_DATA    : out   std_logic;
+    LED_CLK     : out   std_logic := '0';
+    LED_DATA    : out   std_logic := '0';
 
     -- RTC Interface
     RTC_CS      : out   std_logic;
@@ -126,7 +127,9 @@ architecture structural of ultimate_mb_700a is
         
     -- miscellaneous interconnect
     signal ulpi_reset_i     : std_logic;
-
+    signal ulpi_data_o      : std_logic_vector(7 downto 0);
+    signal ulpi_data_t      : std_logic;
+    
     -- Slot
     signal slot_addr_o  : unsigned(15 downto 0);
     signal slot_addr_tl : std_logic;
@@ -140,7 +143,14 @@ architecture structural of ultimate_mb_700a is
     signal memctrl_inhibit  : std_logic;
     signal mem_req          : t_mem_req_32;
     signal mem_resp         : t_mem_resp_32;
-
+    signal cpu_mem_req      : t_mem_req_32;
+    signal cpu_mem_resp     : t_mem_resp_32;
+    signal misc_io          : std_logic_vector(7 downto 0);
+    signal guru_irq         : std_logic := '0';
+    signal io_req           : t_io_req;
+    signal io_resp          : t_io_resp;
+    signal io_irq           : std_logic;
+    
     -- IEC open drain
     signal iec_atn_o   : std_logic;
     signal iec_data_o  : std_logic;
@@ -175,9 +185,14 @@ architecture structural of ultimate_mb_700a is
     signal audio_left  : signed(18 downto 0);
     signal audio_right : signed(18 downto 0);
 
+    -- Some CPU locals
+    signal invalidate       : std_logic;
+    signal inv_addr         : std_logic_vector(31 downto 0);
+    constant c_tag_usb2     : std_logic_vector(7 downto 0) := X"09";
 begin
     reset_in <= '1' when BUTTON="000" else '0'; -- all 3 buttons pressed
     button_i <= not BUTTON;
+    SD_DATA <= "ZZ";
 
     i_clkgen: entity work.s3a_clockgen
     port map (
@@ -190,23 +205,66 @@ begin
         sys_reset    => sys_reset,
         sys_clock_2x => sys_clock_2x );
 
+    i_cpu: entity work.mblite_wrapper
+    generic map (
+        g_tag_i     => X"20",
+        g_tag_d     => X"21" )
+    port map (
+        clock       => sys_clock,
+        reset       => sys_reset,
+        mb_reset    => '0',
+        
+        irq_i       => io_irq,
+        disable_i   => misc_io(1),
+        disable_d   => misc_io(2),
+        invalidate  => invalidate,
+        inv_addr    => inv_addr,
+        
+        -- memory interface
+        mem_req     => cpu_mem_req,
+        mem_resp    => cpu_mem_resp,
+        
+        io_busy     => open,
+        io_req      => io_req,
+        io_resp     => io_resp );
+
+    -- TODO: also invalidate for rmii
+    invalidate <= misc_io(0) when (mem_resp.rack_tag(5 downto 0) = c_tag_usb2(5 downto 0)) and (mem_req.read_writen = '0') else '0';
+    inv_addr(31 downto 26) <= (others => '0');
+    inv_addr(25 downto 0) <= std_logic_vector(mem_req.address);
+
+    -- Detecting writes in program area that corrupt the application
+    process(sys_clock)
+    begin
+        if rising_edge(sys_clock) then
+            if sys_reset = '1' then
+                guru_irq <= '0';
+            elsif misc_io(7) = '1' then
+                if cpu_mem_req.request = '1' and cpu_mem_req.read_writen = '0' and
+                   cpu_mem_req.address(24 downto 20) = 0 then
+                    guru_irq <= '1';
+                end if;
+            end if;
+        end if;
+    end process;
+
     i_logic: entity work.ultimate_logic_32
     generic map (
-        g_version       => g_version,
         g_simulation    => false,
+        g_big_endian    => true,
         g_clock_freq    => 50_000_000,
         g_baud_rate     => 115_200,
         g_icap          => true,
         g_uart          => true,
         g_drive_1541    => true,
         g_drive_1541_2  => g_dual_drive,
+        g_mm_drive      => false,
         g_hardware_gcr  => true,
         g_ram_expansion => true,
         g_extended_reu  => false,
         g_stereo_sid    => not g_dual_drive,
         g_8voices       => false,
         g_hardware_iec  => true,
-        g_iec_prog_tim  => false,
         g_c2n_streamer  => true,
         g_c2n_recorder  => g_dual_drive,
         g_cartridge     => true,
@@ -214,13 +272,14 @@ begin
         g_drive_sound   => true,
         g_rtc_chip      => true,
         g_rtc_timer     => false,
-        g_usb_host      => false,
         g_usb_host2     => true,
         g_spi_flash     => true,
         g_vic_copper    => false,
         g_video_overlay => false,
+        g_sdcard        => true,
+        g_eeprom        => g_eeprom,
         g_sampler       => not g_dual_drive,
-        g_acia          => g_dual_drive )
+        g_acia          => g_acia )
     port map (
         -- globals
         sys_clock   => sys_clock,
@@ -260,8 +319,17 @@ begin
         io1n_i      => IO1n,
         io2n_i      => IO2n,
         
+        -- CPU Interface
+        misc_io     => misc_io,
+        ext_io_req  => io_req,
+        ext_io_resp => io_resp,
+        ext_mem_req => cpu_mem_req,
+        ext_mem_resp=> cpu_mem_resp,
+        cpu_irq     => io_irq,
+        guru_irq    => guru_irq,
+
         -- local bus side
-        mem_inhibit => memctrl_inhibit,
+        mem_refr_inhibit => memctrl_inhibit,
         --memctrl_idle    => memctrl_idle,
         mem_req     => mem_req,
         mem_resp    => mem_resp,
@@ -310,11 +378,6 @@ begin
         SD_MOSI     => SD_MOSI,
         SD_MISO     => SD_MISO,
         SD_CARDDETn => SD_CARDDETn,
-        SD_DATA     => SD_DATA,
-        
-        -- LED interface
-        LED_CLK     => LED_CLK,
-        LED_DATA    => LED_DATA,
         
         -- RTC Interface
         RTC_CS      => RTC_CS,
@@ -332,7 +395,9 @@ begin
         ULPI_NXT    => ULPI_NXT,
         ULPI_STP    => ULPI_STP,
         ULPI_DIR    => ULPI_DIR,
-        ULPI_DATA   => ULPI_DATA,
+        ULPI_DATA_O => ulpi_data_o,
+        ULPI_DATA_I => ULPI_DATA,
+        ULPI_DATA_T => ulpi_data_t,
     
         -- Cassette Interface
         c2n_read_in    => c2n_read_in, 
@@ -349,6 +414,8 @@ begin
         -- Buttons
         BUTTON      => button_i );
 
+    ULPI_DATA <= ulpi_data_o when ulpi_data_t = '1' else "ZZZZZZZZ";
+    
     -- Parallel cable not implemented. This is the way to stub it...
     drv_via1_port_a_i(7 downto 1) <= drv_via1_port_a_o(7 downto 1) or not drv_via1_port_a_t(7 downto 1);
     drv_via1_port_a_i(0)          <= drv_track_is_0; -- for 1541C

@@ -14,6 +14,8 @@ library ieee;
     use work.audio_type_pkg.all;
         
 entity u2p_nios_solo is
+generic (
+    g_dual_drive     : boolean := true );
 port (
     -- slot side
     SLOT_PHI2        : in    std_logic;
@@ -195,6 +197,8 @@ architecture rtl of u2p_nios_solo is
         
     -- miscellaneous interconnect
     signal ulpi_reset_i     : std_logic;
+    signal ulpi_data_o      : std_logic_vector(7 downto 0);
+    signal ulpi_data_t      : std_logic;
     
     -- memory controller interconnect
     signal memctrl_inhibit  : std_logic;
@@ -353,7 +357,7 @@ begin
         io_read            => io_req.read,
         io_wdata           => io_req.data,
         io_write           => io_req.write,
-        unsigned(io_address) => io_req.address,
+        unsigned(io_address) => io_req.address(19 downto 0),
         io_irq             => io_irq,
 
         io_u2p_ack         => io_u2p_resp.ack,
@@ -361,7 +365,7 @@ begin
         io_u2p_read        => io_u2p_req.read,
         io_u2p_wdata       => io_u2p_req.data,
         io_u2p_write       => io_u2p_req.write,
-        unsigned(io_u2p_address) => io_u2p_req.address,
+        unsigned(io_u2p_address) => io_u2p_req.address(19 downto 0),
         io_u2p_irq         => '0',
         
         unsigned(mem_mem_req_address) => cpu_mem_req.address,
@@ -425,7 +429,7 @@ begin
         resps(1)   => io_resp_debug
     );
 
-    i_memphy: entity work.ddr2_ctrl
+    i_memphy: entity work.ddr2_ctrl_fast
     port map (
         ref_clock         => RMII_REFCLK,
         ref_reset         => ref_reset,
@@ -450,7 +454,7 @@ begin
         SDRAM_CASn        => SDRAM_CASn,
         SDRAM_WEn         => SDRAM_WEn,
         SDRAM_A           => SDRAM_A,
-        SDRAM_BA          => SDRAM_BA(1 downto 0),
+        SDRAM_BA          => SDRAM_BA,
         SDRAM_DM          => SDRAM_DM,
         SDRAM_DQ          => SDRAM_DQ,
         SDRAM_DQS         => SDRAM_DQS
@@ -502,7 +506,6 @@ begin
 
     i_logic: entity work.ultimate_logic_32
     generic map (
-        g_version       => X"1A",
         g_simulation    => false,
         g_ultimate2plus => true,
         g_clock_freq    => 62_500_000,
@@ -510,19 +513,18 @@ begin
         g_denominator   => 125,
         g_baud_rate     => 115_200,
         g_timer_rate    => 200_000,
-        g_microblaze    => false,
         g_big_endian    => false,
         g_icap          => false,
         g_uart          => true,
         g_drive_1541    => true,
-        g_drive_1541_2  => true,
+        g_drive_1541_2  => g_dual_drive,
+        g_mm_drive      => true,
         g_hardware_gcr  => true,
         g_ram_expansion => true,
         g_extended_reu  => false,
         g_stereo_sid    => true,
         g_8voices       => true,
         g_hardware_iec  => true,
-        g_iec_prog_tim  => false,
         g_c2n_streamer  => true,
         g_c2n_recorder  => true,
         g_cartridge     => true,
@@ -530,7 +532,6 @@ begin
         g_drive_sound   => true,
         g_rtc_chip      => false,
         g_rtc_timer     => false,
-        g_usb_host      => false,
         g_usb_host2     => true,
         g_spi_flash     => true,
         g_vic_copper    => false,
@@ -554,7 +555,7 @@ begin
         
         -- slot side
         BUFFER_ENn  => open,
-        VCC         => SLOT_VCC,
+        VCCDET      => SLOT_VCC,
 
         phi2_i      => SLOT_PHI2,
         dotclk_i    => SLOT_DOTCLK,
@@ -586,7 +587,7 @@ begin
         io2n_i      => SLOT_IO2n,
                 
         -- local bus side
-        mem_inhibit => memctrl_inhibit,
+        mem_refr_inhibit => memctrl_inhibit,
         mem_req     => mem_req,
         mem_resp    => mem_resp,
                  
@@ -650,7 +651,6 @@ begin
         SD_MOSI     => open,
         SD_MISO     => '1',
         SD_CARDDETn => '1',
-        SD_DATA     => open,
         
         -- RTC Interface
         RTC_CS      => open,
@@ -668,7 +668,9 @@ begin
         ULPI_NXT    => ULPI_NXT,
         ULPI_STP    => ULPI_STP,
         ULPI_DIR    => ULPI_DIR,
-        ULPI_DATA   => ULPI_DATA,
+        ULPI_DATA_O => ulpi_data_o,
+        ULPI_DATA_I => ULPI_DATA,
+        ULPI_DATA_T => ulpi_data_t,
     
         -- Cassette Interface
         c2n_read_in    => c2n_read_in, 
@@ -696,8 +698,9 @@ begin
 
         -- Buttons
         sw_trigger  => sw_trigger,
-        trigger     => sw_trigger,
         BUTTON      => button_i );
+
+    ULPI_DATA <= ulpi_data_o when ulpi_data_t = '1' else "ZZZZZZZZ";
 
     -- Parallel cable not implemented. This is the way to stub it...
     drv_via1_port_a_i(7 downto 1) <= drv_via1_port_a_o(7 downto 1) or not drv_via1_port_a_t(7 downto 1);
@@ -817,8 +820,8 @@ begin
 
         i_ultfilt1: entity work.sys_to_aud port map(sys_clock, sys_reset, sys_get_sample, ult_drive1, audio_clock, aud_drive1 );
         i_ultfilt2: entity work.sys_to_aud port map(sys_clock, sys_reset, sys_get_sample, ult_drive2, audio_clock, aud_drive2 );
-        i_ultfilt3: entity work.sys_to_aud port map(sys_clock, sys_reset, sys_get_sample, ult_tape_r, audio_clock, aud_tape_r );
-        i_ultfilt4: entity work.sys_to_aud port map(sys_clock, sys_reset, sys_get_sample, ult_tape_w, audio_clock, aud_tape_w );
+        i_ultfilt3: entity work.sys_to_aud generic map (false) port map(sys_clock, sys_reset, sys_get_sample, ult_tape_r, audio_clock, aud_tape_r );
+        i_ultfilt4: entity work.sys_to_aud generic map (false) port map(sys_clock, sys_reset, sys_get_sample, ult_tape_w, audio_clock, aud_tape_w );
         i_ultfilt5: entity work.sys_to_aud port map(sys_clock, sys_reset, sys_get_sample, ult_samp_l, audio_clock, aud_samp_l );
         i_ultfilt6: entity work.sys_to_aud port map(sys_clock, sys_reset, sys_get_sample, ult_samp_r, audio_clock, aud_samp_r );
         i_ultfilt7: entity work.sys_to_aud port map(sys_clock, sys_reset, sys_get_sample, ult_sid_1,  audio_clock, aud_sid_1 );

@@ -21,6 +21,7 @@ public:
     Path();
     Path(Path *); // make a copy
     Path(Path *, int start, int stop);
+    Path(const char *p);
     ~Path();
     const char *owner;
 
@@ -36,6 +37,7 @@ public:
     const char *getLastElement();
 
     bool match(Path *search);
+    bool equals(Path *other);
 };
 
 class SubPath

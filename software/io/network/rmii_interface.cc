@@ -7,27 +7,7 @@
 #include "dump_hex.h"
 #include "flash.h"
 #include "mdio.h"
-
-__inline uint32_t cpu_to_32le(uint32_t a)
-{
-#if NIOS
-	return a;
-#else
-	uint32_t m1, m2;
-    m1 = (a & 0x00FF0000) >> 8;
-    m2 = (a & 0x0000FF00) << 8;
-    return (a >> 24) | (a << 24) | m1 | m2;
-#endif
-}
-
-__inline uint16_t le16_to_cpu(uint16_t h)
-{
-#if NIOS
-	return h;
-#else // assume big endian
-    return (h >> 8) | (h << 8);
-#endif
-}
+#include "endianness.h"
 
 RmiiInterface rmii_interface; // global object!
 
@@ -37,7 +17,7 @@ void RmiiInterface_free_buffer(void *drv, void *b) {
 }
 
 // entry point for output packet callback
-uint8_t RmiiInterface_output(void *drv, void *b, int len) {
+err_t RmiiInterface_output(void *drv, void *b, int len) {
 	return ((RmiiInterface *)drv)->output_packet((uint8_t *)b, len);
 }
 
@@ -51,7 +31,8 @@ extern "C" {
 RmiiInterface :: RmiiInterface()
 {
     if(getFpgaCapabilities() & CAPAB_ETH_RMII) {
-		netstack = NULL;
+    	netstack = getNetworkStack(this, RmiiInterface_output, RmiiInterface_free_buffer);
+
 		link_up = false;
 		ram_buffer = new uint8_t[(128 * 1536) + 256];
 		ram_base = (uint8_t *) (((uint32_t)ram_buffer + 255) & 0xFFFFFF00);
@@ -96,8 +77,6 @@ void RmiiInterface :: deinitRx(void)
 
 void RmiiInterface :: rmiiTask(void)
 {
-	netstack = getNetworkStack(this, RmiiInterface_output, RmiiInterface_free_buffer);
-
 	uint8_t flash_serial[8];
 	Flash *flash = get_flash();
 	flash->read_serial(flash_serial);
@@ -212,14 +191,14 @@ void RmiiInterface :: free_buffer(uint8_t *buffer)
 	RMII_FREE_PUT = id;
 }
 
-uint8_t RmiiInterface :: output_packet(uint8_t *buffer, int pkt_len)
+err_t RmiiInterface :: output_packet(uint8_t *buffer, int pkt_len)
 {
 	if (!link_up)
-		return 0;
+		return ERR_CONN;
 
 	if (RMII_TX_BUSY) {
 		printf("Oops.. tx is busy!\n");
-		return 1;
+		return ERR_INPROGRESS;
 	}
 	//printf("Rmii Out Packet: %p %4x\n", buffer, pkt_len);
 	//dump_hex_relative(buffer, (pkt_len > 64)?64:pkt_len);
@@ -227,12 +206,5 @@ uint8_t RmiiInterface :: output_packet(uint8_t *buffer, int pkt_len)
 	RMII_TX_LENGTH  = (uint16_t)((pkt_len < 60)?60:pkt_len);
 	RMII_TX_START   = 1;
 
-	return 0;
+	return ERR_OK;
 }
-
-/*
-uint8_t rmiiTransmit(uint8_t *buffer, int pkt_len)
-{
-	return rmii_interface.output_packet(buffer, pkt_len);
-}
-*/

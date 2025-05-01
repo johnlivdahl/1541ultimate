@@ -78,7 +78,7 @@ public:
 
     virtual void init(Screen *scr, Keyboard *k);
     virtual void redraw(void);
-    void deinit(void);
+    virtual void deinit(void);
 
     virtual int poll(int);
     virtual int poll_inactive(void);
@@ -93,6 +93,7 @@ public:
     void config(void);
     void test_editor(void);
     void copy_selection(void);
+    void delete_selected(void);
     void paste(void);
     void cd(const char *path);
     

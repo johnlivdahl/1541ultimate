@@ -115,10 +115,12 @@ void Screen_VT100::repeat(char c, int rep)
 
 void Screen_VT100::output_fixed_length(const char *string, int offset_x, int width)
 {
+/*
 	if (offset_x)
 		stream->format("\r\e[%dC", offset_x);
 	else
 		stream->format("\r");
+*/
 
 	//repeat(' ', offset_x);
 	while(width > 0) {
@@ -135,4 +137,10 @@ void Screen_VT100::output_fixed_length(const char *string, int offset_x, int wid
 void Screen_VT100::sync(void)
 {
 	stream->sync();
+}
+
+void Screen_VT100::restore_terminal(void) {
+    stream->write("\ec\e[2J", 6);  // RIS (Reset Initial State) + ED2 (Clear entire screen)
+    move_cursor(0, 0);
+    sync();
 }

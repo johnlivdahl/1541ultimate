@@ -71,6 +71,18 @@ Flash *S25FL_Flash :: tester()
 	return NULL;
 }
 
+const char *S25FL_Flash ::get_type_string(void)
+{
+    switch (total_size) {
+    case 8192:
+        return "Spansion S25FL116K"; // reverse engineered; not 100% sure
+    case 16384:
+        return "Spansion S25FL132K";
+    default:
+        return "Spansion";
+    }
+}
+
 void S25FL_Flash :: protect_disable(void)
 {
 	// unprotect the device
@@ -104,15 +116,15 @@ bool S25FL_Flash :: protect_configure(void)
 	// TB = 1
 	// BP[2:0] = 101
 	// SRP0, SEC, TB, BP2, BP1, BP0, WEL, BUSY
-	//  0     0    1   1    0    1    0     0
+	//  0     0    1   0    1    0    0     0  => 0x28
 	
-	// program status register with value 0x34
+	// program status register with value 0x28
 	portENTER_CRITICAL();
 	SPI_FLASH_CTRL = 0;
 	SPI_FLASH_DATA = S25FL_WriteEnable;
     SPI_FLASH_CTRL = SPI_FORCE_SS; // drive CSn low
 	SPI_FLASH_DATA = S25FL_WriteStatusRegister;
-	SPI_FLASH_DATA = 0x34;
+	SPI_FLASH_DATA = 0x28;
 	SPI_FLASH_DATA = 0x00;
     SPI_FLASH_CTRL = SPI_FORCE_SS | SPI_LEVEL_SS; // drive CSn high
 
@@ -133,6 +145,6 @@ void S25FL_Flash :: protect_enable(void)
     SPI_FLASH_CTRL = SPI_FORCE_SS | SPI_LEVEL_SS; // drive CSn high
 	portEXIT_CRITICAL();
 
-    if ((status & 0x7C) != 0x34)
+    if ((status & 0x7C) != 0x28)
     	protect_configure();
 }

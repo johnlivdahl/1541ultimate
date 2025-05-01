@@ -34,7 +34,9 @@ extern "C" {
 }
 
 #ifdef U64
-#include "wifi.h"
+#ifndef RISCV
+#include "esp32.h"
+#endif
 #endif
 #include "acia.h"
 
@@ -69,7 +71,10 @@ int FileTypeUpdate :: fetch_context_items(IndexedList<Action *> &list)
 FileType *FileTypeUpdate :: test_type(BrowsableDirEntry *br)
 {
 	FileInfo *inf = br->getInfo();
-	const char *ext = (getFpgaCapabilities() & CAPAB_ULTIMATE64) ? "U64" : "U2P";
+	uint32_t cap = getFpgaCapabilities();
+	const char *ext = (cap & CAPAB_ULTIMATE64) ? "U64" :
+			          (cap & CAPAB_FPGA_TYPE) ? "U2L" :
+			        		  "U2P";
 	if(strcmp(inf->extension, ext)==0)
         return new FileTypeUpdate(br);
     return NULL;
@@ -87,7 +92,7 @@ void jump_run(uint32_t a)
     	;
 }
 
-int FileTypeUpdate :: execute(SubsysCommand *cmd)
+SubsysResultCode_e FileTypeUpdate :: execute(SubsysCommand *cmd)
 {
 	File *file = 0;
 	uint32_t bytes_read;
@@ -136,7 +141,9 @@ int FileTypeUpdate :: execute(SubsysCommand *cmd)
 		cmd->user_interface->host->release_ownership();
 		file = NULL;
 #if U64
-		wifi.Disable();
+#ifndef RISCV
+		esp32.Quit();
+#endif
 #endif
 #ifndef RECOVERYAPP
         acia.deinit();
@@ -145,7 +152,7 @@ int FileTypeUpdate :: execute(SubsysCommand *cmd)
 	} else {
 		printf("Error opening file.\n");
         cmd->user_interface->popup(FileSystem :: get_error_string(fres), BUTTON_OK);
-		return -1;
+		return SSRET_CANNOT_OPEN_FILE;
 	}
-	return 0;
+	return SSRET_OK;
 }

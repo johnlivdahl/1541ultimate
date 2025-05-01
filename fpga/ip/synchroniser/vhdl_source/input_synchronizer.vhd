@@ -46,6 +46,9 @@ entity input_synchronizer is
     attribute dont_replicate of input_synchronizer          : entity is true;
     attribute dont_retime                                   : boolean;
     attribute dont_retime of input_synchronizer             : entity is true;
+    -- Lattice attributes
+    attribute syn_replicate                                 : boolean;
+    attribute syn_replicate of input_synchronizer           : entity is false;
     ---------------------------------------------------------------------------
 
 end input_synchronizer;
@@ -56,8 +59,8 @@ architecture rtl of input_synchronizer is
     signal sync2        : std_logic;
 
     -- Xilinx attributes
-    attribute iob                                           : string;
-    attribute iob of sync1                                  : signal is "true";
+    -- attribute iob                                           : string;
+    -- attribute iob of sync1                                  : signal is "true";
     -- Altera attributes
     -- Add FAST_INPUT_REGISTER to qsf file to force the sync1 register into an iob
 

@@ -15,7 +15,7 @@ void itu_clear_irqs(void)
     ioWrite8(ITU_IRQ_HIGH_EN, 0x00);
 }
 
-
+uint32_t getFpgaCapabilities() __attribute__((weak));
 uint32_t getFpgaCapabilities()
 {
 	uint32_t res = 0;
@@ -36,7 +36,6 @@ uint8_t getFpgaVersion()
 	return ioRead8(ITU_FPGA_VERSION);
 #endif
 }
-
 
 /*
 -------------------------------------------------------------------------------
@@ -211,7 +210,7 @@ uint16_t uart_write_buffer(const void *buf, uint16_t count)
 */
 uint16_t uart_write_hex(uint8_t b)
 {
-    const char hex[] = "0123456789ABCDEF";
+    static const char hex[] = "0123456789ABCDEF";
     outbyte(hex[b >> 4]);
     outbyte(hex[b & 15]);
     return 2;
@@ -274,11 +273,12 @@ void outbyte(int c)
 {
     if (custom_outbyte) {
         custom_outbyte(c);
-    } else {
+    }
+//    else {
         // Wait for space in FIFO
         while (ioRead8(UART_FLAGS) & UART_TxFifoFull);
         ioWrite8(UART_DATA, c);
-    }
+//    }
 }
 
 #ifdef RUNS_ON_PC

@@ -11,8 +11,7 @@ generic (
     g_cartreset_init: std_logic := '0';
     g_boot_stop     : boolean := false;
     g_kernal_repl   : boolean := true;
-    g_rom_base      : unsigned(27 downto 0) := X"0F80000";
-    g_ram_base      : unsigned(27 downto 0) := X"0F70000";
+    g_timing_meas   : boolean := false;
     g_ram_expansion : boolean := true );
 port (
     clock           : in  std_logic;
@@ -38,7 +37,8 @@ begin
             io_resp <= c_io_resp_init;
             control_i.cartridge_kill <= '0'; 
             control_i.cartridge_force <= '0';
-            
+            control_i.timing_trigger <= '0';
+
             if io_req.write='1' then
                 io_resp.ack <= '1';
                 case io_req.address(3 downto 0) is
@@ -57,13 +57,15 @@ begin
                     control_i.c64_stop_mode <= io_req.data(1 downto 0);
                 when c_cart_cartridge_type =>
                     control_i.cartridge_type <= io_req.data(4 downto 0);
-                    control_i.cartridge_force <= io_req.data(7);
+                    control_i.cartridge_variant <= io_req.data(7 downto 5);
                 when c_cart_cartridge_kill =>
-                    control_i.cartridge_kill <= '1';
+                    control_i.cartridge_kill <= io_req.data(0);
+                    control_i.cartridge_force <= io_req.data(1);
                 when c_cart_kernal_enable =>
                     if g_kernal_repl then
                         control_i.kernal_enable <= io_req.data(0);
-                        control_i.kernal_16k <= io_req.data(1);
+--                        control_i.kernal_16k <= io_req.data(1);
+                        control_i.kernal_shadow <= io_req.data(2);
                     end if;
                 when c_cart_reu_enable =>
                     control_i.reu_enable <= io_req.data(0);
@@ -72,9 +74,13 @@ begin
                 when c_cart_serve_control =>
                     control_i.serve_while_stopped <= io_req.data(0);
                 when c_cart_timing =>
-                    control_i.timing_addr_valid <= unsigned(io_req.data(2 downto 0)); 
+                    control_i.timing_addr_phi2 <= unsigned(io_req.data(3 downto 0));
+                    control_i.timing_addr_phi1 <= unsigned(io_req.data(7 downto 4)); 
                 when c_cart_phi2_recover =>
                     control_i.phi2_edge_recover <= io_req.data(0);
+                    control_i.measure_enable <= io_req.data(1);
+                    control_i.force_serve_vic <= io_req.data(2); 
+                    control_i.timing_trigger <= io_req.data(3);
                 when c_cart_swap_buttons =>
                 	control_i.swap_buttons <= io_req.data(0);
                 when c_cart_sampler_enable =>
@@ -100,15 +106,16 @@ begin
                     io_resp.data(2) <= status.exrom;
                     io_resp.data(3) <= status.game;
                     io_resp.data(4) <= status.reset_in;
-                when c_cart_cartridge_rom_base =>
-                    io_resp.data <= std_logic_vector(g_rom_base(23 downto 16));
+                    io_resp.data(5) <= status.nmi;
                 when c_cart_cartridge_type =>
                     io_resp.data(4 downto 0) <= control_i.cartridge_type;
+                    io_resp.data(7 downto 5) <= control_i.cartridge_variant;
                 when c_cart_cartridge_active =>
                     io_resp.data(0) <= status.cart_active;
                 when c_cart_kernal_enable =>
                     io_resp.data(0) <= control_i.kernal_enable;
-                    io_resp.data(1) <= control_i.kernal_16k;
+--                    io_resp.data(1) <= control_i.kernal_16k;
+--                    io_resp.data(2) <= control_i.kernal_shadow;
                 when c_cart_reu_enable =>
                     io_resp.data(0) <= control_i.reu_enable;
                 when c_cart_reu_size =>
@@ -117,17 +124,24 @@ begin
                     io_resp.data(0) <= control_i.serve_while_stopped;
                 when c_cart_sampler_enable =>
                     io_resp.data(0) <= control_i.sampler_enable;
-                when c_cart_timing =>
-                    io_resp.data(2 downto 0) <= std_logic_vector(control_i.timing_addr_valid); 
+--                when c_cart_timing =>
+--                    io_resp.data(3 downto 0) <= std_logic_vector(control_i.timing_addr_phi2);
+--                    io_resp.data(7 downto 4) <= std_logic_vector(control_i.timing_addr_phi1); 
                 when c_cart_phi2_recover =>
                     io_resp.data(0) <= control_i.phi2_edge_recover;
-                when c_cart_swap_buttons =>
-                	io_resp.data(0) <= control_i.swap_buttons;
+--                    io_resp.data(1) <= control_i.measure_enable;
+                    io_resp.data(2) <= control_i.force_serve_vic; 
+--                when c_cart_swap_buttons =>
+--                	io_resp.data(0) <= control_i.swap_buttons;
                 when others =>
                     null;
                 end case;
             end if;
-                        
+
+            if not g_timing_meas then
+                control_i.measure_enable <= '0';
+            end if;
+
             if reset='1' then
                 control_i <= c_cart_control_init;
                 control_i.c64_reset <= g_cartreset_init;

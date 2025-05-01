@@ -19,6 +19,7 @@
 static const char *colors[] = { "Black", "White", "Red", "Cyan", "Purple", "Green", "Blue", "Yellow",
                          "Orange", "Brown", "Pink", "Dark Grey", "Mid Grey", "Light Green", "Light Blue", "Light Grey" };
                           
+static const char *filename_overflow_squeeze[] = { "None", "Beginning", "Middle", "End" };
 static const char *itype[]      = { "Freeze", "Overlay on HDMI" };
 static const char *cfg_save[]   = { "No", "Ask", "Yes" };
 
@@ -38,6 +39,7 @@ struct t_cfg_definition user_if_config[] = {
     { CFG_USERIF_START_HOME, CFG_TYPE_ENUM,   "Enter Home on Startup", "%s", en_dis, 0,  1, 0 },
     { CFG_USERIF_CFG_SAVE,   CFG_TYPE_ENUM,   "Auto Save Config",      "%s", cfg_save, 0, 2, 1 },
     { CFG_USERIF_ULTICOPY_NAME, CFG_TYPE_ENUM, "Ulticopy Uses disk name", "%s", en_dis, 0, 1, 1 },
+    { CFG_USERIF_FILENAME_OVERFLOW_SQUEEZE, CFG_TYPE_ENUM, "Filename overflow squeeze", "%s", filename_overflow_squeeze, 0, 3, 0 },
     { CFG_TYPE_END,           CFG_TYPE_END,    "", "", NULL, 0, 0, 0 }         
 };
 
@@ -52,6 +54,8 @@ UserInterface :: UserInterface(const char *title) : title(title)
     doBreak = false;
     available = false;
     color_sel_bg = 0;
+    filename_overflow_squeeze = 0;
+    menu_response_to_action = MENU_NOP;
     register_store(0x47454E2E, "User Interface Settings", user_if_config);
     effectuate_settings();
 }
@@ -79,6 +83,7 @@ void UserInterface :: effectuate_settings(void)
     color_sel_bg = cfg->get_value(CFG_USERIF_SELECTED_BG);
 #endif
     config_save  = cfg->get_value(CFG_USERIF_CFG_SAVE);
+    filename_overflow_squeeze = cfg->get_value(CFG_USERIF_FILENAME_OVERFLOW_SQUEEZE);
 
     if(host && host->is_accessible())
         host->set_colors(color_bg, color_border);
@@ -113,13 +118,13 @@ void UserInterface :: run_remote(void)
     appear();
     available = true;
     while(1) {
-        if (!pollFocussed()) {
+        if (pollFocussed() == MENU_EXIT) {
             available = false;
-            host->releaseScreen();
             break;
         }
         vTaskDelay(3);
     }
+    host->release_ownership();
 }
 
 void UserInterface :: run(void)
@@ -174,11 +179,25 @@ void UserInterface :: run_once(void)
             }
             host->release_ownership();
             break;
-        } else if (!pollFocussed()) {
-            available = false;
-            host->releaseScreen();
-            host->release_ownership();
-            break;
+        } else {
+            int ret = pollFocussed();
+            if (ret != 0)
+                printf("Poll Focussed returned %d. DoBreak = %d.\n", ret, doBreak);
+            switch(ret) {
+            case MENU_NOP:
+                break;
+            case MENU_HIDE:
+            case MENU_EXIT:
+                available = false;
+                doBreak = true;
+                if (!host->is_permanent()) {
+                    release_host();
+                }
+                host->release_ownership();
+                break;
+            default:
+                break;
+            }
         }
         vTaskDelay(3);
     }
@@ -237,30 +256,63 @@ int UserInterface :: pollInactive(void)
     return ui_objects[focus]->poll_inactive();
 }
 
-bool UserInterface :: pollFocussed(void)
+void UserInterface :: peel_off(void)
+{
+    // Peel off will always keep the first object
+    if (!focus) {
+        return;
+    }
+    // The underlying object gets focus. If the top object has the cleanup
+    // flag set, we destoy it here and it can not be referenced in the
+    // calling object.
+    ui_objects[focus]->deinit();
+    // Note that the object itself still exists, and needs to be cleaned up by the one who created
+    // it, unless the auto cleanup flag is set
+    if (ui_objects[focus]->needCleanup()) {
+        delete ui_objects[focus];
+    }
+    ui_objects[focus] = NULL;
+    focus--;
+}
+
+int UserInterface :: pollFocussed(void)
 {
 	int ret = 0;
     do {
         ret = ui_objects[focus]->poll(ret); // param pass chain
-        if(!ret) // return value of 0 keeps us in the same state
-            break;
-        printf("Object level %d returned %d.\n", focus, ret);
 
-        if (host->is_permanent() && (!focus)) {
-            return false;
+        // Stay in the current window configuration
+        if(ret == 0)
+            break;
+
+        printf("Object level %d returned %d.\n", focus, (int)ret);
+
+        // Pass non-root positive results to underlying object
+        if ((ret > 0) && (focus)) {
+            peel_off();
+            continue; // pass result
         }
-        ui_objects[focus]->deinit();
-        if (ret == -2) {
-            delete ui_objects[focus];
-            ui_objects[focus] = NULL;
+
+        switch (ret) {
+        case MENU_CLOSE:
+            // close single layer window and pass to caller (might be cancel code)
+            peel_off();
+            continue; //  pass to upper layer
+
+        case MENU_HIDE:
+        case MENU_EXIT:
+            printf("MENU HIDE / EXIT.\n");
+            // deinitialize everything, and roll back. Caller solves this, as what happens depends on type of UI.
+            return ret;
+            
+        default:
+            printf("ERROR: Return code %d not expected here.\n", ret); // could happen for root
+            ret = 0;
+            break;
         }
-        if(focus) {
-            focus--;
-        } else {
-        	return false;
-        }
+
     } while(1);
-    return true;
+    return ret;
 }
 
 void UserInterface :: appear(void)
@@ -279,11 +331,7 @@ void UserInterface :: release_host(void)
     for(int i=focus;i>=0;i--) {  // tear down
         ui_objects[i]->deinit();
     }
-    host->releaseScreen();
-
-    if (!host->is_permanent()) {
-        doBreak = true;
-    }
+    doBreak = true;
 }
 
 bool UserInterface :: is_available(void)
@@ -302,28 +350,38 @@ int UserInterface :: activate_uiobject(UIObject *obj)
     return -1;
 }
 
+bool UserInterface :: has_focus(UIObject *obj)
+{
+    return (ui_objects[focus] == obj);
+}
+
 void UserInterface :: set_screen_title()
 {
     int width = screen->get_size_x();
     int height = screen->get_size_y();
 
-    int len = title.length()-4;
+    int len = title.length();
     int hpos = (width - len) / 2;
 
     screen->clear();
     screen->move_cursor(hpos, 0);
+    screen->output("\eA");
     screen->output(title.c_str());
+    screen->output("\eO");
     screen->move_cursor(0, 1);
 	screen->repeat('\002', width);
     screen->move_cursor(0, height-1);
 	screen->scroll_mode(false);
 	screen->repeat('\002', width);
 }
-    
+
 /* Blocking variants of our simple objects follow: */
 int  UserInterface :: popup(const char *msg, uint8_t flags)
 {
-    UIPopup *pop = new UIPopup(msg, flags);
+    const char *c_button_names[] = { " Ok ", " Yes ", " No ", " All ", " Cancel " };
+    const char c_button_keys[] = { 'o', 'y', 'n', 'c', 'a' };
+
+    UIPopup *pop = new UIPopup(msg, flags, 5, c_button_names, c_button_keys);
     pop->init(screen, keyboard);
     int ret;
     do {
@@ -333,6 +391,19 @@ int  UserInterface :: popup(const char *msg, uint8_t flags)
     return ret;
 }
     
+int  UserInterface :: popup(const char *msg, int count, const char **names, const char *keys)
+{
+    UIPopup *pop = new UIPopup(msg, (1 << (count + 1))-1, count, names, keys);
+    pop->init(screen, keyboard);
+    int ret;
+    do {
+        ret = pop->poll(0);
+    } while(!ret);
+    pop->deinit();
+    delete pop;
+    return ret;
+}
+
 int UserInterface :: string_box(const char *msg, char *buffer, int maxlen)
 {
     UIStringBox *box = new UIStringBox(msg, buffer, maxlen);
@@ -344,6 +415,21 @@ int UserInterface :: string_box(const char *msg, char *buffer, int maxlen)
     } while(!ret);
     screen->cursor_visible(0);
     box->deinit();
+    delete box;
+    return ret;
+}
+
+int UserInterface :: string_edit(char *buffer, int maxlen, Window *w, int x, int y)
+{
+    UIStringEdit *edit = new UIStringEdit(buffer, maxlen);
+    edit->init(w, keyboard, x, y, maxlen); // maybe the max len should be limited by the window!
+    screen->cursor_visible(1);
+    int ret;
+    do {
+        ret = edit->poll(0);
+    } while(!ret);
+    screen->cursor_visible(0);
+    delete edit;
     return ret;
 }
 
@@ -373,6 +459,7 @@ void UserInterface :: run_editor(const char *text_buf, int max_len)
         ret = edit->poll(0);
     } while(!ret);
     edit->deinit();
+    delete edit;
 }
 
 int UserInterface :: enterSelection()

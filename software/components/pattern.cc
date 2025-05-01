@@ -182,7 +182,7 @@ bool pattern_match_escaped(const char *pattern, const char *fixed, bool case_sen
     return false; // never gets here.
 }
 
-void split_string(char sep, char *s, char **parts, int maxParts)
+int split_string(char sep, char *s, char **parts, int maxParts)
 {
     int len = strlen(s);
     int idx = 0;
@@ -193,6 +193,7 @@ void split_string(char sep, char *s, char **parts, int maxParts)
             parts[idx++] = s + i + 1;
         }
     }
+    return idx;
 }
 
 bool isEmptyString(const char *c)
@@ -330,7 +331,7 @@ int fix_filename(char *buffer)
     return replacements;
 }
 
-int get_extension(const char *name, char *ext)
+int get_extension(const char *name, char *ext, bool caps)
 {
     int len = strlen(name);
     ext[0] = 0;
@@ -342,12 +343,48 @@ int get_extension(const char *name, char *ext)
                 ext[j+1] = 0; // the char after the current is always end
                 if (!name[i+1+j])
                     break;
-                ext[j] = toupper(name[i+1+j]);
+                if(caps) {
+                    ext[j] = toupper(name[i+1+j]);
+                } else {
+                    ext[j] = name[i+1+j];
+                }
             }
             break;
         }
     }
     return len;
+}
+
+// Truncates the filename such that the resulting string will always fit in the
+// buffer, and the extension is copied, if at all possible.
+// Example, if bufsize is 32, then the maximum length of the string will be 31.
+// This means that if the length of the extension is 3, the base string will
+// be at most 27 chars.
+void truncate_filename(const char *orig, char *buf, int bufsize)
+{
+    buf[0] = 0;
+    if (bufsize < 5) {
+        return;
+    }
+    char ext[4];
+    get_extension(orig, ext);
+
+    strncpy(buf, orig, bufsize);
+    buf[bufsize-5] = 0;
+
+    set_extension(buf, ext, bufsize);
+}
+
+const char *get_filename(const char *path)
+{
+    int n = strlen(path);
+    while(n) {
+        if (path[n] == '/') {
+            return path + n + 1;
+        }
+        n--;
+    }
+    return path;
 }
 
 void petscii_to_fat(const char *pet, char *fat, int maxlen)

@@ -29,7 +29,7 @@ port (
     buttons         : in  std_logic_vector(2 downto 0);
     
     irq_timer_tick  : in  std_logic := '0';
-    irq_in          : in  std_logic_vector(7 downto 2);
+    irq_in          : in  std_logic_vector(7 downto 2) := (others => '0');
     irq_flags       : out std_logic_vector(7 downto 0);
     irq_high        : in  std_logic_vector(7 downto 0) := X"00";
 
@@ -78,6 +78,7 @@ architecture gideon of itu is
     
     signal usb_busy         : std_logic;
     signal sd_busy          : std_logic;
+    signal printer_busy     : std_logic;
 begin
     process(clock)
         variable new_irq_edge_flag  : std_logic_vector(irq_edge_flag'range);
@@ -200,6 +201,8 @@ begin
                     usb_busy <= io_req_ms.data(0);
                 when c_itu_sd_busy =>
                     sd_busy <= io_req_ms.data(0);
+                when c_itu_printer_busy =>
+                    printer_busy <= io_req_ms.data(0);
                 when c_itu_misc_io =>
                     misc_io <= io_req_ms.data;
                 when c_itu_irq_en_high =>
@@ -216,7 +219,7 @@ begin
                 when c_itu_ms_timer_hi =>
                     io_resp_ms.data <= std_logic_vector(ms_timer(15 downto 8));
                 when c_itu_irq_act_high =>
-                    io_resp_ms.data <= irq_high;
+                    io_resp_ms.data <= irq_high and imask_high;
                 when c_itu_irq_en_high =>
                     io_resp_ms.data <= imask_high;
                 when others =>
@@ -257,6 +260,7 @@ begin
                 ms_timer      <= (others => '0');
                 usb_busy      <= '0';
                 sd_busy       <= '0';
+                printer_busy  <= '0';
                 misc_io       <= (others => '0');
             end if;
         end if;
@@ -312,7 +316,7 @@ begin
         end process;
     end generate;
     
-    busy_led <= usb_busy or sd_busy;
+    busy_led <= usb_busy or sd_busy or printer_busy;
     
     irq_flags <= irq_active;
 end architecture;

@@ -33,10 +33,11 @@ public:
 
     bool exists(void) { return true; }
     bool is_accessible(void) { return true; }
-
+    
     Screen   *getScreen(void);
-    void releaseScreen(void);
     Keyboard *getKeyboard(void);
+
+    void release_ownership(void);
 };
 
 #endif /* IO_STREAM_HOST_STREAM_H_ */

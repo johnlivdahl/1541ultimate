@@ -210,6 +210,8 @@ architecture rtl of u2p_tester is
         
     -- miscellaneous interconnect
     signal ulpi_reset_i     : std_logic;
+    signal ulpi_data_o      : std_logic_vector(7 downto 0);
+    signal ulpi_data_t      : std_logic;
     
     -- memory controller interconnect
     signal memctrl_inhibit  : std_logic;
@@ -227,9 +229,9 @@ architecture rtl of u2p_tester is
         
     -- io buses
     signal io_irq           : std_logic;
-    signal io_req           : t_io_req;
+    signal io_req           : t_io_req := c_io_req_init;
     signal io_resp          : t_io_resp;
-    signal io_u2p_req       : t_io_req;
+    signal io_u2p_req       : t_io_req := c_io_req_init;
     signal io_u2p_resp      : t_io_resp;
     signal io_req_new_io    : t_io_req;
     signal io_resp_new_io   : t_io_resp;
@@ -356,7 +358,7 @@ begin
         io_u2p_read             => io_u2p_req.read,
         io_u2p_wdata            => io_u2p_req.data,
         io_u2p_write            => io_u2p_req.write,
-        unsigned(io_u2p_address) => io_u2p_req.address,
+        unsigned(io_u2p_address) => io_u2p_req.address(19 downto 0),
         io_u2p_irq              => '0',
 
         io_ack               => io_resp.ack,
@@ -364,7 +366,7 @@ begin
         io_read              => io_req.read,
         io_wdata             => io_req.data,
         io_write             => io_req.write,
-        unsigned(io_address) => io_req.address,
+        unsigned(io_address) => io_req.address(19 downto 0),
         io_irq               => io_irq,
 
         jtag0_jtag_tck          => jtag0_jtag_tck,
@@ -453,7 +455,7 @@ begin
         SDRAM_CASn        => SDRAM_CASn,
         SDRAM_WEn         => SDRAM_WEn,
         SDRAM_A           => SDRAM_A,
-        SDRAM_BA          => SDRAM_BA(1 downto 0),
+        SDRAM_BA          => SDRAM_BA,
         SDRAM_DM          => SDRAM_DM,
         SDRAM_DQ          => SDRAM_DQ,
         SDRAM_DQS         => SDRAM_DQS
@@ -511,7 +513,6 @@ begin
         g_denominator   => 125,
         g_baud_rate     => 115_200,
         g_timer_rate    => 200_000,
-        g_microblaze    => false,
         g_big_endian    => false,
         g_icap          => false,
         g_uart          => true,
@@ -523,7 +524,6 @@ begin
         g_extended_reu  => false,
         g_stereo_sid    => false,
         g_hardware_iec  => false,
-        g_iec_prog_tim  => false,
         g_c2n_streamer  => false,
         g_c2n_recorder  => false,
         g_cartridge     => false,
@@ -531,7 +531,6 @@ begin
         g_drive_sound   => false,
         g_rtc_chip      => false,
         g_rtc_timer     => false,
-        g_usb_host      => false,
         g_usb_host2     => true,
         g_spi_flash     => true,
         g_vic_copper    => false,
@@ -570,7 +569,9 @@ begin
         ULPI_NXT    => ULPI_NXT,
         ULPI_STP    => ULPI_STP,
         ULPI_DIR    => ULPI_DIR,
-        ULPI_DATA   => ULPI_DATA,
+        ULPI_DATA_O => ulpi_data_o,
+        ULPI_DATA_I => ULPI_DATA,
+        ULPI_DATA_T => ulpi_data_t,
     
         -- Parallel cable pins
         drv_via1_port_a_o   => drv_via1_port_a_o,
@@ -597,6 +598,8 @@ begin
 
         -- Buttons
         BUTTON      => not BUTTON );
+
+    ULPI_DATA <= ulpi_data_o when ulpi_data_t = '1' else "ZZZZZZZZ";
 
     -- Parallel cable not implemented. This is the way to stub it...
     drv_via1_port_a_i <= drv_via1_port_a_o or not drv_via1_port_a_t;
@@ -757,8 +760,12 @@ begin
     SLOT_ROMHn     <= '1'; -- prim_uart_rts_n;
                       -- prim_uart_cts_n   <= SLOT_RSTn;
                       -- prim_uart_rxd     <= SLOT_IRQn;
-    io_uart_rxd    <= SLOT_IRQn;
-    SLOT_NMIn      <= io_uart_txd;
+
+    -- io_uart_rxd    <= SLOT_IRQn;
+    -- SLOT_NMIn      <= io_uart_txd;
+
+    UART_TXD    <= io_uart_txd;
+    io_uart_rxd <= UART_RXD;
 
     -- SLOT_NMIn      <= prim_uart_txd and io_uart_txd;
     

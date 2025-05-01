@@ -14,6 +14,8 @@ extern "C" {
 ConfigBrowser :: ConfigBrowser(UserInterface *ui, Browsable *root) : TreeBrowser(ui, root)
 {
     printf("Constructor config browser\n");
+    setCleanup();
+    state = new ConfigBrowserState(root, this, 0);
 }
 
 ConfigBrowser :: ~ConfigBrowser()
@@ -27,7 +29,6 @@ void ConfigBrowser :: init(Screen *screen, Keyboard *k) // call on root!
 	window = new Window(screen, (screen->get_size_x() - 40) >> 1, 2, 40, screen->get_size_y()-3);
 	window->draw_border();
 	keyb = k;
-    state = new ConfigBrowserState(root, this, 0);
     state->reload();
 	state->do_refresh();
 }
@@ -52,7 +53,7 @@ void ConfigBrowserState :: into(void)
     deeper->previous = this;
 
     int error;
-    printf("Going deeper into = %s\n", under_cursor->getName());
+    // printf("Going deeper into = %s\n", under_cursor->getName());
 	deeper->children = under_cursor->getSubItems(error);
 	int child_count = deeper->children->get_elements();
     if(child_count < 1) {
@@ -88,8 +89,11 @@ void ConfigBrowserState :: change(void)
         case CFG_TYPE_ENUM:
             browser->context(it->getValue() - it->definition->min);
             break;
+        case CFG_TYPE_STRFUNC:
+            browser->context(0);
+            break;
         case CFG_TYPE_VALUE:
-        	if ((it->definition->max - it->definition->min) < 30) {
+        	if ((it->definition->max - it->definition->min) < 40) { // was 30, but days of the month then becomes an exception.. :-/
                 browser->context(it->getValue() - it->definition->min);
         	}
             break;
@@ -106,7 +110,7 @@ void ConfigBrowserState :: change(void)
         case CFG_TYPE_FUNC:
             refresh = true;
             func = (t_cfg_func)(it->definition->items);
-            func(browser->user_interface);
+            func(browser->user_interface, it);
             break;
         default:
             break;
@@ -173,6 +177,8 @@ void ConfigBrowser :: on_exit(void)
     }
 }
 
+extern const char *helptext;
+
 int ConfigBrowser :: handle_key(int c)
 {
     int ret = 0;
@@ -189,7 +195,7 @@ int ConfigBrowser :: handle_key(int c)
             if(state->level!=0)
             // check if we need to save to flash
             on_exit();
-            ret = -2;
+            ret = MENU_CLOSE;
             break;
         case KEY_DOWN: // down
             state->down(1);
@@ -204,6 +210,11 @@ int ConfigBrowser :: handle_key(int c)
         case KEY_F7: // F7 -> page down
         case KEY_PAGEDOWN:
             state->down(window->get_size_y()/2);
+            break;
+        case KEY_F3: // F3 -> help
+            reset_quick_seek();
+            state->refresh = true;
+            user_interface->run_editor(helptext, strlen(helptext));
             break;
         case KEY_SPACE: // space = select
         case KEY_RETURN: // CR = select
@@ -226,7 +237,7 @@ int ConfigBrowser :: handle_key(int c)
 		case KEY_BACK: // del
             if(state->level==0) {
                 on_exit();
-                ret = -2; // leave
+                ret = MENU_CLOSE; // leave
             } else {
                 state->level_up();
             }

@@ -19,14 +19,14 @@ public:
     ~TaskMenu(void);
     
     void init(Window *pwin, Keyboard *keyb);
-    int select(void);
+    int select_item(void);
 };
 
 class TaskSubMenu : public ContextMenu
 {
     TaskCategory *category;
 public:
-    TaskSubMenu(UserInterface *ui, TreeBrowserState *state, TaskCategory *cat, int item);
+    TaskSubMenu(UserInterface *ui, TreeBrowserState *state, TaskCategory *cat, int first, int item);
     ~TaskSubMenu() { }
     int get_items(void);
 };

@@ -19,106 +19,34 @@ W25Q_Flash w25q_flash;
 
 //#define debug(x)
 
-// Free space 0x103000 - 108000 (0x5000)
-// FPGA = ~0x54000 in length
-// MAX APPL length = 500K => 969 pages / 4 sectors
-// CUSTOM FPGA is thus on sector 12.. 
-
 static const t_flash_address flash_addresses[] = {
-	{ FLASH_ID_BOOTFPGA,   0x01, 0x000000, 0x000000, 0x53CA0 },
-	{ FLASH_ID_BOOTAPP,    0x01, 0x054000, 0x054000, 0x0C000 }, // 192 pages (48K)
-
-	{ FLASH_ID_AR5PAL,     0x00, 0x060000, 0x060000, 0x08000 },
-	{ FLASH_ID_AR6PAL,     0x00, 0x068000, 0x068000, 0x08000 },
-	{ FLASH_ID_FINAL3,     0x00, 0x070000, 0x070000, 0x10000 },
-	{ FLASH_ID_KCS,        0x00, 0x080000, 0x080000, 0x04000 }, //0x84000-8A000 free (24K)
-	{ FLASH_ID_EPYX,       0x00, 0x08A000, 0x08A000, 0x02000 }, //0x8C000-90000 free (16K)
-	{ FLASH_ID_RR38PAL,    0x00, 0x090000, 0x090000, 0x10000 },
-	{ FLASH_ID_SS5PAL,     0x00, 0x0A0000, 0x0A0000, 0x10000 },
-	{ FLASH_ID_AR5NTSC,    0x00, 0x0B0000, 0x0B0000, 0x08000 }, // B8000-C0000 free (32K)
-	{ FLASH_ID_RR38NTSC,   0x00, 0x0C0000, 0x0C0000, 0x10000 },
-	{ FLASH_ID_SS5NTSC,    0x00, 0x0D0000, 0x0D0000, 0x10000 },
-	{ FLASH_ID_TAR_PAL,    0x00, 0x0E0000, 0x0E0000, 0x10000 },
-	{ FLASH_ID_TAR_NTSC,   0x00, 0x0F0000, 0x0F0000, 0x10000 },
-
-	{ FLASH_ID_APPL,       0x01, 0x100000, 0x100000, 0xC0000 }, // max size: 768K
-	{ FLASH_ID_CUSTOM_ROM, 0x00, 0x1C0000, 0x1C0000, 0x20000 }, // max size: 128K
-	{ FLASH_ID_KERNAL_ROM, 0x00, 0x1E0000, 0x1E0000, 0x02000 },
-	{ FLASH_ID_CUSTOM_DRV, 0x00, 0x1E2000, 0x1E2000, 0x08000 }, // free: 1ea000-1f0000
-	{ FLASH_ID_CONFIG,     0x00, 0x1F0000, 0x1F0000, 0x10000 },
+	{ FLASH_ID_BOOTFPGA,   0x01, 0x000000, 0x000000, 0x53CA0 }, // 1341 pages (rounded to 1344 pages)
+	{ FLASH_ID_BOOTAPP,    0x01, 0x054000, 0x054000, 0x0E000 }, //  224 pages (56K)
+	{ FLASH_ID_APPL,       0x01, 0x062000, 0x062000, 0xC6000 }, // 3168 pages (max size: 792K)
+	{ FLASH_ID_FLASHDRIVE, 0x00, 0x128000, 0x128000, 0xC8000 }, // 3200 pages (max size: 800K)
+	{ FLASH_ID_CONFIG,     0x00, 0x1F0000, 0x1F0000, 0x10000 }, //  256 pages
 	{ FLASH_ID_LIST_END,   0x00, 0x1FE000, 0x1FE000, 0x01000 } };
 
-
 static const t_flash_address flash_addresses_u2p[] = {
-	{ FLASH_ID_BOOTFPGA,   0x01, 0x000000, 0x000000, 0xC0000  },
-	{ FLASH_ID_APPL,       0x01, 0x0C0000, 0x0C0000, 0x140000 }, // Max 1.25 MB
+	{ FLASH_ID_BOOTFPGA,   0x00, 0x000000, 0x000000, 0x0C0000 },
+	{ FLASH_ID_APPL,       0x00, 0x0C0000, 0x0C0000, 0x140000 }, // Max 1.25 MB
+	{ FLASH_ID_FLASHDRIVE, 0x00, 0x200000, 0x200000, 0x1F0000 },  // free space: 1984 KB
+	{ FLASH_ID_CONFIG,     0x00, 0x3F0000, 0x3F0000, 0x010000 },
+	{ FLASH_ID_LIST_END,   0x00, 0x3FE000, 0x3FE000, 0x001000 } };
 
-	{ FLASH_ID_AR5PAL,     0x00, 0x200000, 0x200000, 0x08000 },
-	{ FLASH_ID_AR6PAL,     0x00, 0x208000, 0x208000, 0x08000 },
-	{ FLASH_ID_FINAL3,     0x00, 0x210000, 0x210000, 0x10000 },
-	{ FLASH_ID_RR38PAL,    0x00, 0x220000, 0x220000, 0x10000 },
-	{ FLASH_ID_RR38NTSC,   0x00, 0x230000, 0x230000, 0x10000 },
-	{ FLASH_ID_TAR_PAL,    0x00, 0x240000, 0x240000, 0x10000 },
-	{ FLASH_ID_TAR_NTSC,   0x00, 0x250000, 0x250000, 0x10000 },
-	{ FLASH_ID_SS5PAL,     0x00, 0x260000, 0x260000, 0x10000 },
-	{ FLASH_ID_SS5NTSC,    0x00, 0x270000, 0x270000, 0x10000 },
-	{ FLASH_ID_AR5NTSC,    0x00, 0x280000, 0x280000, 0x08000 },
-	{ FLASH_ID_KCS,        0x00, 0x288000, 0x288000, 0x04000 },
-	{ FLASH_ID_EPYX,       0x00, 0x28C000, 0x28C000, 0x02000 },
-	{ FLASH_ID_KERNAL_ROM, 0x00, 0x28E000, 0x28E000, 0x02000 },
-	{ FLASH_ID_CUSTOM_DRV, 0x00, 0x290000, 0x290000, 0x08000 },
-	{ FLASH_ID_CUSTOM_ROM, 0x00, 0x298000, 0x298000, 0x20000 }, // max size: 128K, free 0x2b8000-0x3f0000
-
-	{ FLASH_ID_KERNAL_ROM2,0x00, 0x29A000, 0x29A000, 0x02000 },
-	{ FLASH_ID_CUSTOM2_DRV,0x00, 0x29C000, 0x29C000, 0x08000 }, // ends at 0x2A4000
-
-	{ FLASH_ID_FLASHDRIVE, 0x00, 0x300000, 0x300000, 0xF0000 }, // 960KB, will move to 0x200000 when all internal roms are removed
-
-	{ FLASH_ID_CONFIG,     0x00, 0x3F0000, 0x3F0000, 0x10000 },
-	{ FLASH_ID_LIST_END,   0x00, 0x3FE000, 0x3FE000, 0x01000 } };
-
+static const t_flash_address flash_addresses_u2pl[] = {
+	{ FLASH_ID_BOOTFPGA,   0x00, 0x000000, 0x000000, 0x0C0000 },
+	{ FLASH_ID_APPL,       0x00, 0x0A0000, 0x0A0000, 0x160000 }, // Max 1.375 MB
+	{ FLASH_ID_FLASHDRIVE, 0x00, 0x200000, 0x200000, 0x5F0000 }, // free space: 6080 KB
+	{ FLASH_ID_CONFIG,     0x00, 0x7F0000, 0x7F0000, 0x010000 },
+	{ FLASH_ID_LIST_END,   0x00, 0x7FE000, 0x7FE000, 0x001000 } };
 
 static const t_flash_address flash_addresses_u64[] = {
-	{ FLASH_ID_BOOTFPGA,   0x01, 0x000000, 0x000000, 0x290000 }, // 282BD4
-	{ FLASH_ID_APPL,       0x01, 0x290000, 0x290000, 0x170000 }, // Max 1.5 MB
-
-	{ FLASH_ID_AR5PAL,     0x00, 0x400000, 0x400000, 0x08000 },
-	{ FLASH_ID_AR6PAL,     0x00, 0x408000, 0x408000, 0x08000 },
-	{ FLASH_ID_FINAL3,     0x00, 0x410000, 0x410000, 0x10000 },
-	{ FLASH_ID_RR38PAL,    0x00, 0x420000, 0x420000, 0x10000 },
-	{ FLASH_ID_SS5PAL,     0x00, 0x430000, 0x430000, 0x10000 },
-    { FLASH_ID_TAR_PAL,    0x00, 0x440000, 0x440000, 0x10000 },
-
-    { FLASH_ID_RR38NTSC,   0x00, 0x450000, 0x450000, 0x10000 },
-    { FLASH_ID_SS5NTSC,    0x00, 0x460000, 0x460000, 0x10000 },
-    { FLASH_ID_TAR_NTSC,   0x00, 0x470000, 0x470000, 0x10000 },
-
-    { FLASH_ID_KCS,        0x00, 0x480000, 0x480000, 0x04000 },
-	{ FLASH_ID_EPYX,       0x00, 0x484000, 0x484000, 0x02000 },
-	// End of ROM Pack
-
-	// Start of Custom Images
-    { FLASH_ID_ORIG_CHARGEN, 0x00, 0x486000, 0x486000, 0x01000 },
-    { FLASH_ID_CHARGEN_ROM,  0x00, 0x487000, 0x487000, 0x01000 },
-    { FLASH_ID_ORIG_KERNAL,  0x00, 0x488000, 0x488000, 0x02000 },
-    { FLASH_ID_ORIG_BASIC,   0x00, 0x48A000, 0x48A000, 0x02000 },
-    { FLASH_ID_KERNAL_ROM,   0x00, 0x48C000, 0x48C000, 0x02000 },
-    { FLASH_ID_BASIC_ROM,    0x00, 0x48E000, 0x48E000, 0x02000 },
-
-    { FLASH_ID_CUSTOM_DRV,   0x00, 0x490000, 0x490000, 0x08000 },
-    { FLASH_ID_CUSTOM2_DRV,  0x00, 0x498000, 0x498000, 0x08000 },
-    { FLASH_ID_CUSTOM3_DRV,  0x00, 0x4A0000, 0x4A0000, 0x08000 },
-
-    { FLASH_ID_KERNAL_ROM2,  0x00, 0x4A8000, 0x4A8000, 0x02000 },
-    { FLASH_ID_KERNAL_ROM3,  0x00, 0x4AA000, 0x4AA000, 0x02000 },
-
-    { FLASH_ID_CUSTOM_ROM,   0x00, 0x4AC000, 0x4AC000, 0x44000 }, // max size: 272K
-
-// ends at 0x4F0000  (free space: 3136 KB)
-	{ FLASH_ID_FLASHDRIVE,   0x00, 0x4F0000, 0x4F0000, 0x300000 }, // This will move to 0x400000 when all internal roms are removed
-
-	{ FLASH_ID_CONFIG,     0x00, 0x7F0000, 0x7F0000, 0x10000 },
-	{ FLASH_ID_LIST_END,   0x00, 0x7FE000, 0x7FE000, 0x01000 } };
+	{ FLASH_ID_BOOTFPGA,   0x00, 0x000000, 0x000000, 0x290000 }, // 282BD4
+	{ FLASH_ID_APPL,       0x00, 0x290000, 0x290000, 0x170000 }, // Max 1.5 MB
+	{ FLASH_ID_FLASHDRIVE, 0x00, 0x400000, 0x400000, 0x3E8000 }, // ends at 0x7E8000  (free space: 4000 KB)
+	{ FLASH_ID_CONFIG,     0x00, 0x7E8000, 0x7E8000, 0x018000 },
+	{ FLASH_ID_LIST_END,   0x00, 0x7FE000, 0x7FE000, 0x001000 } };
 
 W25Q_Flash::W25Q_Flash()
 {
@@ -139,7 +67,11 @@ void W25Q_Flash :: get_image_addresses(int id, t_flash_address *addr)
 	if (getFpgaCapabilities() & CAPAB_ULTIMATE64) {
 		a = (t_flash_address *)flash_addresses_u64;
 	} else if (getFpgaCapabilities() & CAPAB_ULTIMATE2PLUS) {
-		a = (t_flash_address *)flash_addresses_u2p;
+		if (getFpgaCapabilities() & CAPAB_FPGA_TYPE) {
+			a = (t_flash_address *)flash_addresses_u2pl;
+		} else {
+			a = (t_flash_address *)flash_addresses_u2p;
+		}
 	} else {
 		a = (t_flash_address *)flash_addresses;
 	}
@@ -232,15 +164,15 @@ const char *W25Q_Flash :: get_type_string(void)
 {
 	switch(total_size) {
 	case 4096:
-		return "W25Q80";
+		return "Winbond W25Q80";
 	case 8192:
-		return "W25Q16";
+		return "Winbond W25Q16";
 	case 16384:
-		return "W25Q32";
+		return "Winbond W25Q32";
 	case 32768:
-		return "W25Q64";
+		return "Winbond W25Q64";
 	case 65536:
-		return "W25Q128";
+		return "Winbond W25Q128";
 	default:
 		return "Winbond";
 	}
@@ -368,8 +300,17 @@ bool W25Q_Flash :: write_page(int page, const void *buffer)
     SPI_FLASH_DATA = uint8_t(device_addr >> 16);
     SPI_FLASH_DATA = uint8_t(device_addr >> 8);
     SPI_FLASH_DATA = uint8_t(device_addr);
-    for(int i=0;i<len;i++) {
-        SPI_FLASH_DATA_32 = *(buf++);
+    uint32_t buf_addr = (uint32_t)buffer;
+    if (buf_addr & 3) { // not aligned
+        len *= 4;
+        uint8_t *buf8 = (uint8_t *)buffer;
+        for (int i = 0; i < len; i++) {
+            SPI_FLASH_DATA = *(buf8++);
+        }
+    } else {
+        for (int i = 0; i < len; i++) {
+            SPI_FLASH_DATA_32 = *(buf++);
+        }
     }
     SPI_FLASH_CTRL = SPI_FORCE_SS | SPI_LEVEL_SS;
     bool ret = wait_ready(15); // datasheet: max 3 ms for page write, spansion: 5 ms max
@@ -462,56 +403,66 @@ void W25Q_Flash :: protect_disable(void)
     portEXIT_CRITICAL();
 }
 
-bool W25Q_Flash :: protect_configure(void)
+bool W25Q_Flash ::protect_configure(void)
 {
-	// to protect the LOWER 7/8 of the device,
-	// the the following bits need to be set:
-	// WPS = 0, CMP = 1
-	// SEC TB BP2 BP1 BP0 = 0 0 1 0 0
-	// CMP is bit 6 in Status Register 2. (0x40)
+    // protect the LOWER QUARTER of the device:
+    // SEC = 0
+    // TB = 1
+    // BP[2:0] = 101
+    // SRP0, SEC, TB, BP2, BP1, BP0, WEL, BUSY
+    //  0     0    1   1    0    1    0     0
 
-	// protect the LOWER HALF of the device:
-	// SEC = 0
-	// TB = 1
-	// BP[2:0] = 101
-	// SRP0, SEC, TB, BP2, BP1, BP0, WEL, BUSY
-	//  0     0    1   1    0    1    0     0
-	
-	// program status register with value 0x34
+    // protect the LOWER HALF of the device:
+    // SEC = 0
+    // TB = 1
+    // BP[2:0] = 101
+    // SRP0, SEC, TB, BP2, BP1, BP0, WEL, BUSY
+    //  0     0    1   1    1    0    0     0
+
+    // W25Q16: Lower Half: 00110100 = 0x34 (1M), Lower Quarter (512KB): 00110000 = 0x30 (U2)  => 0x34: 1 MB locked
+    // W25Q32: Lower Half: 00111000 = 0x38 (2M), Lower Quarter (   1M): 00110100 = 0x34 (U2+) => 0x38: 2 MB locked
+    // W25Q64: Lower Half: 00111000 = 0x38 (4M), Lower Quarter (   2M): 00110100 = 0x34 (U64) => 0x38: 4 MB locked
+
+    // program status register with value 0x34 for 8MB and 0x38 for 4MB devices
     portENTER_CRITICAL();
-	SPI_FLASH_CTRL = 0;
-	SPI_FLASH_DATA = W25Q_WriteEnable;
+    SPI_FLASH_CTRL = 0;
+    SPI_FLASH_DATA = W25Q_WriteEnable;
     SPI_FLASH_CTRL = SPI_FORCE_SS; // drive CSn low
-	SPI_FLASH_DATA = W25Q_WriteStatusRegister1;
-	SPI_FLASH_DATA = 0x34;
-    SPI_FLASH_CTRL = SPI_FORCE_SS | SPI_LEVEL_SS; // drive CSn high
-	wait_ready(50);
+    SPI_FLASH_DATA = W25Q_WriteStatusRegister1;
+#if U64
+    SPI_FLASH_DATA = 0x38; // 4 MB locked
+#else
+    SPI_FLASH_DATA = (total_size == 16384) ? 0x38 : 0x34; // 4MB is used on U2+, which locks half of the device. U2+L uses 8MB, of which only 2 MB needs protection
+#endif
 
-	SPI_FLASH_CTRL = 0;
-	SPI_FLASH_DATA = W25Q_WriteEnable;
+    SPI_FLASH_CTRL = SPI_FORCE_SS | SPI_LEVEL_SS; // drive CSn high
+    wait_ready(50);
+
+    SPI_FLASH_CTRL = 0;
+    SPI_FLASH_DATA = W25Q_WriteEnable;
     SPI_FLASH_CTRL = SPI_FORCE_SS; // drive CSn low
-	SPI_FLASH_DATA = W25Q_WriteStatusRegister2;
-	SPI_FLASH_DATA = 0x00;
+    SPI_FLASH_DATA = W25Q_WriteStatusRegister2;
+    SPI_FLASH_DATA = 0x00;
     SPI_FLASH_CTRL = SPI_FORCE_SS | SPI_LEVEL_SS; // drive CSn high
-	wait_ready(50);
+    wait_ready(50);
 
-	SPI_FLASH_CTRL = 0;
-	SPI_FLASH_DATA = W25Q_WriteDisable;
+    SPI_FLASH_CTRL = 0;
+    SPI_FLASH_DATA = W25Q_WriteDisable;
     portEXIT_CRITICAL();
-	return true;
+    return true;
 }
 
-void W25Q_Flash :: protect_enable(void)
+void W25Q_Flash ::protect_enable(void)
 {
     portENTER_CRITICAL();
     SPI_FLASH_CTRL = SPI_FORCE_SS; // drive CSn low
-	SPI_FLASH_DATA = W25Q_ReadStatusRegister1;
-	uint8_t status = SPI_FLASH_DATA;
+    SPI_FLASH_DATA = W25Q_ReadStatusRegister1;
+    uint8_t status = SPI_FLASH_DATA;
     SPI_FLASH_CTRL = SPI_FORCE_SS | SPI_LEVEL_SS; // drive CSn high
     portEXIT_CRITICAL();
 
-    if ((status & 0x7C) != 0x10)
-    	protect_configure();
+    if ((status & 0x70) != 0x30)
+        protect_configure();
 }
 
 bool W25Q_Flash :: wait_ready(int time_out)

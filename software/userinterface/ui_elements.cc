@@ -6,15 +6,15 @@
  */
 #include "ui_elements.h"
 #include <string.h>
+#include <stdio.h>
 
-const char *c_button_names[NUM_BUTTONS] = { " Ok ", " Yes ", " No ", " All ", " Cancel " };
-const char c_button_keys[NUM_BUTTONS] = { 'o', 'y', 'n', 'c', 'a' };
-const int c_button_widths[NUM_BUTTONS] = { 4, 5, 4, 5, 8 };
 
 /* User Interface Objects */
 /* Popup */
-UIPopup :: UIPopup(const char *msg, uint8_t btns) : message(msg)
+UIPopup :: UIPopup(const char *msg, uint8_t btns, int count, const char **names, const char *keys) : message(msg), button_count(count)
 {
+    button_names = names;
+    button_keys = keys;
     buttons = btns;
     btns_active = 0;
     active_button = 0; // we can change this
@@ -31,10 +31,10 @@ void UIPopup :: init(Screen *screen, Keyboard *k)
     keyboard = k;
 
     uint8_t b = buttons;
-    for(int i=0;i<NUM_BUTTONS;i++) {
+    for(int i=0;i<button_count;i++) {
         if(b & 1) {
             btns_active ++;
-            button_width += c_button_widths[i];
+            button_width += strlen(button_names[i]);
         }
         b >>= 1;
     }
@@ -67,11 +67,11 @@ void UIPopup :: draw_buttons()
     window->move_cursor(button_start_x, 2);
     int j=0;
     int b = buttons;
-    for(int i=0;i<NUM_BUTTONS;i++) {
+    for(int i=0;i<button_count;i++) {
         if(b & 1) {
 			window->reverse_mode((j == active_button)? 1 : 0);
-        	window->output((char *)c_button_names[i]);
-            button_key[j++] = c_button_keys[i];
+        	window->output((char *)button_names[i]);
+            button_key[j++] = button_keys[i];
         }
         b >>= 1;
     }
@@ -94,7 +94,7 @@ int UIPopup :: poll(int dummy)
         }
     }
     if((c == KEY_RETURN)||(c == KEY_SPACE)) {
-		for(int i=0,j=0;i<NUM_BUTTONS;i++) {
+		for(int i=0,j=0;i < button_count;i++) {
 			if(buttons & (1 << i)) {
 				if(active_button == j)
 					return (1 << i);
@@ -123,39 +123,60 @@ void UIPopup :: deinit()
 	delete window;
 }
 
+UIStringBox :: UIStringBox(const char *msg, char *buf, int max) : message(msg), edit(buf, max)
+{
+}
 
-UIStringBox :: UIStringBox(const char *msg, char *buf, int max) : message(msg)
+UIStringEdit :: UIStringEdit(char *buf, int max)
 {
     buffer = buf;
     max_len = max;
+    max_chars = 0;
+    edit_offs = 0;
     window = 0;
     keyboard = 0;
     cur = len = 0;
+    win_xoffs = 0;
+    win_yoffs = 0;
 }
 
 void UIStringBox :: init(Screen *screen, Keyboard *keyb)
 {
     int message_width = message.length();
     int window_width = message_width;
-    if (max_len > message_width)
-        window_width = max_len;
-    window_width += 2; // compensate for border
+    if (edit.get_max_len() > message_width)
+        window_width = edit.get_max_len();
+    window_width += 3; // compensate for border, and the cursor
+
+    // Maximize to screen width
+    if (window_width >= screen->get_size_x()) {
+        window_width = screen->get_size_x();
+    }
+    int max_chars = window_width - 2; // compensate for border. Total number of chars visible in string box
 
     int x1 = (screen->get_size_x() - window_width) / 2;
     int y1 = (screen->get_size_y() - 5) / 2;
     int x_m = (window_width - message_width) / 2;
 
-    keyboard = keyb;
     screen->backup();
     window = new Window(screen, x1, y1, window_width, 5);
     window->clear();
     window->draw_border();
     window->move_cursor(x_m, 0);
-    window->output_line(message.c_str());
+    window->output(message.c_str());
 
-    window->move_cursor(0, 2);
-    //scr = window->get_pointer();
+    edit.init(window, keyb, 0, 2, max_chars);
+}
 
+void UIStringEdit :: init(Window *win, Keyboard *kb, int xo, int yo, int max_c)
+{
+    win_xoffs = xo;
+    win_yoffs = yo;
+    keyboard = kb;
+    window = win;
+    max_chars = max_c;
+
+    window->move_cursor(xo, yo);
     keyboard->wait_free();
 
     /// Now prefill the box...
@@ -170,11 +191,14 @@ void UIStringBox :: init(Screen *screen, Keyboard *keyb)
     }
     len = cur;
 /// Default to old string
-    window->output_length(buffer, len);
-    window->move_cursor(cur, 2);
+    if (len > (max_chars-1)) {
+        edit_offs = 1 + len - max_chars;
+    }
+    window->output_length(buffer+edit_offs, (len < max_chars)?len : max_chars);
+    window->move_cursor(win_xoffs+ cur-edit_offs, win_yoffs);
 }
 
-int UIStringBox :: poll(int dummy)
+int UIStringEdit :: poll(int dummy)
 {
     int key;
     int i;
@@ -187,20 +211,32 @@ int UIStringBox :: poll(int dummy)
 
     switch(key) {
     case KEY_RETURN: // CR
+        buffer[len] = 0;
         if(!len)
             return -1; // cancel
-        buffer[len] = 0;
         return 1; // done
     case KEY_LEFT: // left
     	if (cur > 0) {
             cur--;
-        	window->move_cursor(cur, 2);
+            if (cur-5 < edit_offs) { // scroll left?
+                edit_offs -= 5;
+                if (edit_offs < 0)
+                    edit_offs = 0;
+                window->move_cursor(win_xoffs, win_yoffs);
+                window->output_length(buffer+edit_offs, max_chars);
+            }
+            window->move_cursor(win_xoffs + cur-edit_offs, win_yoffs);
         }
         break;
     case KEY_RIGHT: // right
         if (cur < len) {
             cur++;
-        	window->move_cursor(cur, 2);
+            if ((cur-edit_offs) > (max_chars-1)) {
+                edit_offs++;
+                window->move_cursor(win_xoffs, win_yoffs);
+                window->output_length(buffer+edit_offs,max_chars);
+            }
+        	window->move_cursor(win_xoffs + cur-edit_offs, win_yoffs);
         }
         break;
     case KEY_BACK: // backspace
@@ -209,42 +245,70 @@ int UIStringBox :: poll(int dummy)
             len--;
             for(i=cur;i<len;i++) {
                 buffer[i] = buffer[i+1];
-            } buffer[i] = 32;
-//            window->move_cursor(0, 2);
-            window->output_length(buffer, len+1);
-            window->move_cursor(cur, 2);
+            } buffer[i] = 0;
+
+            if (cur-5 < edit_offs) { // scroll left?
+                edit_offs -= 5;
+                if (edit_offs < 0)
+                    edit_offs = 0;
+                window->move_cursor(win_xoffs, win_yoffs);
+                window->output_length(buffer+edit_offs, max_chars);
+                window->move_cursor(win_xoffs+cur-edit_offs, win_yoffs);
+            } else { // no scroll left, just redraw from cursor position
+                window->move_cursor(win_xoffs+cur-edit_offs, win_yoffs);
+                window->output_length(buffer+cur, max_chars+edit_offs-cur);
+                window->move_cursor(win_xoffs+cur-edit_offs, win_yoffs);
+            }
         }
         break;
     case KEY_CLEAR: // clear
+        buffer[0] = 0;
         len = 0;
         cur = 0;
-        window->move_cursor(0, 2);
-        window->repeat(' ', max_len);
-        window->move_cursor(cur, 2);
+        edit_offs = 0;
+        window->move_cursor(win_xoffs, win_yoffs);
+        window->output_length(buffer+cur, max_chars+edit_offs-cur);
+        window->move_cursor(win_xoffs, win_yoffs);
         break;
     case KEY_DELETE: // del
         if(cur < len) {
             len--;
             for(i=cur;i<len;i++) {
             	buffer[i] = buffer[i+1];
-            } buffer[i] = 0x20;
-            window->output_length(buffer, len+1);
-            window->move_cursor(cur, 2);
+            } buffer[i] = 0;
+            window->move_cursor(win_xoffs+cur-edit_offs, win_yoffs);
+            window->output_length(buffer+cur, max_chars+edit_offs-cur);  // cursor position = cur-edit_offs. remaining chars = max_chars-cursor_position = max_chars+edit_offs-cur
+            window->move_cursor(win_xoffs+cur-edit_offs, win_yoffs);
         }
         break;
     case KEY_HOME: // home
+    case KEY_UP: // up = home
         cur = 0;
-        window->move_cursor(cur, 2);
+        if (edit_offs) { // scroll to the  beginning?
+            edit_offs = 0;
+            window->move_cursor(win_xoffs, win_yoffs);
+            window->output_length(buffer, max_chars);
+        }
+        window->move_cursor(win_xoffs + cur, win_yoffs);
         break;
     case KEY_DOWN: // down = end
     case KEY_END:
-        cur = len;
-        window->move_cursor(cur, 2);
+        if (cur != len) {
+            cur = len;
+            if (cur >= (max_chars-1)) {
+                edit_offs = 1 + cur - max_chars;
+                window->move_cursor(win_xoffs, win_yoffs);
+                window->output_length(buffer+edit_offs, max_chars);
+            }
+            window->move_cursor(win_xoffs + cur-edit_offs, win_yoffs);
+        }
         break;
     case KEY_BREAK: // break
+    case KEY_ESCAPE: // exit!
         return -1; // cancel
     default:
-        if ((key < 32)||(key > 127)) {
+        if ((key < 32)||(key >= 127)) {
+            printf("Unhandled key: %d\n", key);
             break;
         }
         if (len < max_len) {
@@ -254,9 +318,19 @@ int UIStringBox :: poll(int dummy)
             buffer[cur] = key;
             cur++;
             len++;
-            window->move_cursor(0, 2);
-            window->output_length(buffer, len);
-            window->move_cursor(cur, 2);
+
+            // When do we NOT need to redraw all? If cursor is not at the end of the edit box
+            // then it is sufficient to redraw only from the cursor to the end of the string
+            if (cur-edit_offs < max_chars) {
+                // window->move_cursor(cur-edit_offs, 2);
+                window->output_length(buffer+cur-1, max_chars+edit_offs-cur);
+                window->move_cursor(win_xoffs+cur-edit_offs, win_yoffs);
+            } else {
+                edit_offs++;
+                window->move_cursor(win_xoffs, win_yoffs);
+                window->output_length(buffer+edit_offs, max_chars);
+                window->move_cursor(win_xoffs+cur-edit_offs, win_yoffs);
+            }
         }
         break;
     }
@@ -292,7 +366,7 @@ void UIStatusBox :: init(Screen *screen)
     window->clear();
     window->draw_border();
     window->move_cursor(x_m, 0);
-    window->output_line(message.c_str());
+    window->output(message.c_str());
     window->move_cursor(0, 2);
     screen->sync();
 }
@@ -310,8 +384,11 @@ void UIStatusBox :: update(const char *msg, int steps)
 
     if(msg) {
         message = msg;
+        int message_width = message.length();
+        int x_m = (window->get_size_x() - message_width) / 2;
         window->clear();
-        window->output_line(message.c_str());
+        window->move_cursor(x_m, 0);
+        window->output(message.c_str());
     }
 
     memset(bar, 32, 36);

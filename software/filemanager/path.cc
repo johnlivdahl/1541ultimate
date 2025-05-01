@@ -46,6 +46,13 @@ Path :: Path(Path *p, int start, int stop) : full_path("/"), elements(stop-start
     regenerateFullPath();
 }
 
+Path :: Path(const char *p) : full_path("/"), elements(8, NULL)
+{
+    owner = "Unknown";
+    depth = 0;
+    cd(p);
+}
+
 void Path :: update(const char *p)
 {
 	if (full_path == p)
@@ -268,6 +275,20 @@ bool Path :: match(Path *search)
     }
     for(int i=0; i<depth; i++) {
         if (!pattern_match(search->getElement(i), getElement(i), false)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Return true when the paths are exactly equal, case insensitive though.
+bool Path :: equals(Path *search)
+{
+    if (search->getDepth() != depth) {
+        return false;
+    }
+    for(int i=0; i<depth; i++) {
+        if (strcasecmp(search->getElement(i), getElement(i)) != 0) {
             return false;
         }
     }

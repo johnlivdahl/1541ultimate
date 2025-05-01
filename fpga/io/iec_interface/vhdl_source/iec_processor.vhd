@@ -16,6 +16,7 @@ port (
 
     -- software fifo interface
     up_fifo_full    : in  std_logic;
+    up_fifo_afull   : in  std_logic;
     up_fifo_put     : out std_logic;
     up_fifo_din     : out std_logic_vector(8 downto 0);
     
@@ -74,7 +75,7 @@ architecture mixed of iec_processor is
     signal timeout_reg  : std_logic := '0';
     signal flush_stack  : std_logic;
         
-    type t_state is (idle, get_inst, decode, wait_true);
+    type t_state is (idle, get_inst, slow_ram, decode, wait_true);
     signal state        : t_state;
 
     signal instruction  : std_logic_vector(29 downto 0);
@@ -108,7 +109,7 @@ begin
     input_vector(29)           <= ctrl_reg;
     input_vector(28)           <= valid_reg;
     input_vector(27)           <= timeout_reg;
-    input_vector(26)           <= up_fifo_full;
+    input_vector(26)           <= up_fifo_afull;
     input_vector(25)           <= '1' when (inputs and a_mask) = a_value else '0';
     input_vector(24)           <= '1' when (a_data_reg = a_databyte) else '0';
     input_vector(23 downto 20) <= inputs;
@@ -121,7 +122,7 @@ begin
     instr_addr <= pc;
     instr_en   <= '1' when (state = get_inst) else '0';
 
-    instruction <= instr_data;
+    instruction <= instr_data when rising_edge(clock);
     
     process(clock)
     begin
@@ -150,6 +151,9 @@ begin
                 
             when get_inst =>
                 pc <= pc + 1;
+                state <= slow_ram;
+
+            when slow_ram =>
                 state <= decode;
 
             when decode =>

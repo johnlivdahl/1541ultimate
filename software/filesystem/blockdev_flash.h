@@ -16,6 +16,7 @@ class BlockDevice_Flash : public BlockDevice
     int pages_per_sector;
     int first_sector;
     int first_page;
+    bool requires_erase;
 public:
     BlockDevice_Flash(Flash *);
     ~BlockDevice_Flash();
@@ -26,5 +27,7 @@ public:
     virtual DRESULT write(const uint8_t *, uint32_t, int);
     virtual DRESULT ioctl(uint8_t, void *);
 };
+
+void reformat_flash_disk(void);
 
 #endif

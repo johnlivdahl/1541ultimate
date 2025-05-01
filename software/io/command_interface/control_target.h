@@ -17,12 +17,14 @@
 #define CTRL_CMD_ENCODE_TRACK   0x12
 #define CTRL_CMD_EASYFLASH      0x20
 #define CTRL_CMD_GET_HWINFO     0x28
+#define CTRL_CMD_GET_DRVINFO    0x29
 #define CTRL_CMD_ENABLE_DISK_A  0x30
 #define CTRL_CMD_DISABLE_DISK_A 0x31
 #define CTRL_CMD_ENABLE_DISK_B  0x32
 #define CTRL_CMD_DISABLE_DISK_B 0x33
 #define CTRL_CMD_DISK_A_POWER   0x34
 #define CTRL_CMD_DISK_B_POWER   0x35
+#define CTRL_CMD_GET_RAMDISKINFO   0x40
 
 class ControlTarget : CommandTarget
 {

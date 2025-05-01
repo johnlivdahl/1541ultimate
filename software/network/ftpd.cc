@@ -6,13 +6,6 @@
 #include <string.h>
 #include "pattern.h"
 
-#if RUNS_ON_PC
-#include <netinet/in.h>
-#else
-#define fcntl(a,b,c)          lwip_fcntl(a,b,c)
-#endif
-
-#include <sys/fcntl.h>
 #include <ctype.h>
 #include <time.h>
 
@@ -191,6 +184,7 @@ int FTPDaemon::listen_task()
         int actual_socket = accept(sockfd, (struct sockaddr * ) &cli_addr, &clilen);
         if (actual_socket < 0) {
             puts("FTPD: ERROR on accept");
+            continue;  // Remote probably closed, just wait for another connection
             // return -3;
         }
 
@@ -243,7 +237,7 @@ void FTPDaemonThread::run(void *a)
 {
     FTPDaemonThread *thread = (FTPDaemonThread *) a;
     thread->handle_connection();
-    lwip_close(thread->socket);
+    __close(thread->socket);
     delete thread;
     num_threads--;
     vTaskDelete(NULL);
@@ -292,7 +286,8 @@ int FTPDaemonThread::handle_connection()
             }
         } else if (n < 0) {
             if (errno == EAGAIN)
-                continue; dbg_printf("FTPD: ERROR reading from socket %d. Errno = %d", n, errno);
+                continue;
+            dbg_printf("FTPD: ERROR reading from socket %d. Errno = %d", n, errno);
             return errno;
         } else { // n == 0
             dbg_printf("FTPD: Socket got closed\n");
@@ -313,7 +308,7 @@ void FTPDaemonThread::send_msg(const char *msg, ...)
     va_end(arg);
     strcat(buffer, "\r\n");
     len = strlen(buffer);
-    lwip_write(socket, buffer, len);
+    __write(socket, buffer, len);
     dbg_printf("FTPD response: %s", buffer);
 }
 
@@ -466,7 +461,7 @@ void FTPDaemonThread::cmd_mlst(const char *arg)
         sprintf(buffer, "250- Listing %s\r\ntype=%s;modify=%04d%02d%02d%02d%02d%02d; %s\r\n250 End", st.name, type, st.year,
                 st.month, st.day, st.hr, st.min, st.sec, st.name);
     else
-        sprintf(buffer, "250- Listing %s\r\ntype=%s;size=%s;modify=%04d%02d%02d%02d%02d%02d; %s\r\n250 End", st.name, type,
+        sprintf(buffer, "250- Listing %s\r\ntype=%s;size=%d;modify=%04d%02d%02d%02d%02d%02d; %s\r\n250 End", st.name, type,
                 st.st_size, st.year, st.month, st.day, st.hr, st.min, st.sec, st.name);
     send_msg(buffer);
 }
@@ -850,9 +845,9 @@ int FTPDataConnection::setup_connection()
 void FTPDataConnection::close_connection()
 {
     if (actual_socket)
-        lwip_close(actual_socket);
+        __close(actual_socket);
     if ((sockfd) && (actual_socket != sockfd))
-        lwip_close(sockfd);
+        __close(sockfd);
 }
 
 int FTPDataConnection::connect_to(struct ip_addr ip, uint16_t port) // active mode
@@ -910,6 +905,7 @@ int FTPDataConnection::do_bind(void)
     xTaskCreate(FTPDataConnection::accept_data, "FTP Data", configMINIMAL_STACK_SIZE, this, tskIDLE_PRIORITY + 2,
             &acceptTaskHandle);
     vTaskDelay(1); // allow the other task to run
+    return 0;
 }
 
 // static
@@ -966,7 +962,7 @@ void FTPDataConnection::directory(int listType, vfs_dir_t *dir)
                 len = sprintf(buffer, "Internal Error\r\n");
             }
             buffer[len] = 0;
-            lwip_send(actual_socket, buffer, len, 0);
+            send(actual_socket, buffer, len, 0);
 
             // for the next iteration
             vfs_dirent = vfs_readdir(dir);
@@ -982,7 +978,7 @@ void FTPDataConnection::sendfile(vfs_file_t *file)
         do {
             read = vfs_read(buffer, 1024, 1, file);
             if (read)
-                lwip_send(actual_socket, buffer, read, 0);
+                send(actual_socket, buffer, read, 0);
         } while (read > 0);
     }
     vfs_close(file);

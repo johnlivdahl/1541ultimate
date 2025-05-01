@@ -31,18 +31,7 @@
 #include "c64.h"
 #include "dump_hex.h"
 #include "tape_controller.h"
-
-__inline uint32_t le_to_cpu_32(uint32_t a)
-{
-#ifdef NIOS
-	return a;
-#else
-	uint32_t m1, m2;
-    m1 = (a & 0x00FF0000) >> 8;
-    m2 = (a & 0x0000FF00) << 8;
-    return (a >> 24) | (a << 24) | m1 | m2;
-#endif
-}
+#include "endianness.h"
 
 // tester instance
 FactoryRegistrator<BrowsableDirEntry *, FileType *> tester_tap(FileType :: getFileTypeFactory(), FileTypeTap :: test_type);
@@ -94,11 +83,11 @@ void FileTypeTap :: readIndexFile(void)
         parseIndexFile(idxFile);
         fm->fclose(idxFile);
     } else {
-        printf("Cannot open file with song lengths.\n");
+        printf("Cannot open index file.\n");
     }
 }
 
-static uint32_t readLine(const char *buffer, uint32_t index, char *out, int outlen)
+uint32_t readLine(const char *buffer, uint32_t index, char *out, int outlen)
 {
     int i = 0;
     // trim leading spaces and tabs
@@ -113,7 +102,7 @@ static uint32_t readLine(const char *buffer, uint32_t index, char *out, int outl
         }
         index++;
     }
-    if (buffer[index] == 0x0A) {
+    if ((buffer[index] == 0x0A) || (buffer[index] == 0x00)) {
         index++;
     }
     out[i] = 0;
@@ -160,12 +149,13 @@ void FileTypeTap :: parseIndexFile(File *f)
     if ((size > 8192) || (size < 8)) { // max 8K index file
         return;
     }
-    char *buffer = new char[size];
+    char *buffer = new char[size+1];
     char *linebuf = new char[80];
     char *name;
 
     uint32_t transferred;
     f->read(buffer, size, &transferred);
+    buffer[size] = 0;
 
     uint32_t offset;
 
@@ -243,19 +233,19 @@ int FileTypeTap :: getCustomBrowsables(Browsable *parentBrowsable, IndexedList<B
     return -1;
 }
 
-int FileTypeTap :: enter_st(SubsysCommand *cmd)
+SubsysResultCode_e FileTypeTap :: enter_st(SubsysCommand *cmd)
 {
     if (cmd->user_interface) {
         int ret = cmd->user_interface->enterSelection();
         if (ret < 0) {
             cmd->user_interface->popup("No Index file found", BUTTON_OK);
         }
-        return ret;
+        return SSRET_OK;
     }
-    return -1;
+    return SSRET_NO_USER_INTERFACE;
 }
 
-int FileTypeTap :: execute_st(SubsysCommand *cmd)
+SubsysResultCode_e FileTypeTap :: execute_st(SubsysCommand *cmd)
 {
 	FRESULT fres;
 	uint8_t read_buf[20];
@@ -278,16 +268,16 @@ int FileTypeTap :: execute_st(SubsysCommand *cmd)
 	fres = FileManager :: getFileManager() -> fopen(cmd->path.c_str(), fn, FA_READ, &file);
 	if(!file) {
 		cmd->user_interface->popup("Can't open TAP file.", BUTTON_OK);
-		return -1;
+		return SSRET_CANNOT_OPEN_FILE;
 	}
 	fres = file->read(read_buf, 20, &bytes_read);
 	if(fres != FR_OK) {
 		cmd->user_interface->popup("Error reading TAP file header.", BUTTON_OK);
-		return -2;
+		return SSRET_FILE_READ_FAILED;
 	}
 	if((bytes_read != 20) || (memcmp(read_buf, signature, 12))) {
 		cmd->user_interface->popup("TAP file: invalid signature.", BUTTON_OK);
-		return -3;
+		return SSRET_ERROR_IN_FILE_FORMAT;
 	}
 	pul = (uint32_t *)&read_buf[16];
 	tape_controller->set_file(file, le_to_cpu_32(*pul), int(read_buf[12]), cmd->mode); // the mode parameter holds the offset in the file
@@ -304,8 +294,6 @@ int FileTypeTap :: execute_st(SubsysCommand *cmd)
         printf("Tape emulation started.\n");
 		break;
 	case TAPFILE_RUN:
-//		c64_command = new SubsysCommand(cmd->user_interface, SUBSYSID_C64, C64_START_CART, (int)&sid_cart, "", "");
-//      c64_command = new SubsysCommand(cmd->user_interface, SUBSYSID_C64, C64_DMA_LOAD, run_code, cmd->path.c_str(), cmd->filename.c_str());
         c64_command = new SubsysCommand(cmd->user_interface, SUBSYSID_C64, C64_DRIVE_LOAD, RUNCODE_TAPE_LOAD_RUN, "A", "");
         c64_command->execute();
 		tape_controller->start(1);
@@ -323,5 +311,5 @@ int FileTypeTap :: execute_st(SubsysCommand *cmd)
     default:
 		break;
 	}
-	return 0;
+	return SSRET_OK;
 }

@@ -5,8 +5,10 @@ entity sync_fifo is
     generic (
         g_depth        : integer := 512;        -- Actual depth. 
         g_data_width   : integer := 32;
-        g_threshold    : integer := 13;
+        g_threshold    : integer := 10;
+        g_threshold_low: integer := 2;
         g_storage      : string  := "auto";     -- can also be "blockram" or "distributed"
+        g_storage_lat  : string  := "block_ram"; -- can also be "distrubuted" or "registers" even
         g_fall_through : boolean := false);
     port (
         clock       : in  std_logic;
@@ -18,11 +20,12 @@ entity sync_fifo is
         din         : in  std_logic_vector(g_data_width-1 downto 0);
         dout        : out std_logic_vector(g_data_width-1 downto 0);
 
-        flush       : in  std_logic;
+        flush       : in  std_logic := '0';
 
         full        : out std_logic;
         almost_full : out std_logic;
         empty       : out std_logic;
+        almost_empty: out std_logic;
         valid       : out std_logic;
         count       : out integer range 0 to g_depth
     );
@@ -40,6 +43,9 @@ architecture  rtl  of  sync_fifo  is
     attribute ram_style of data_array : signal is g_storage;
     attribute ramstyle        : string;
     attribute ramstyle of data_array : signal is g_storage;
+    -- Lattice Attribute
+    attribute syn_ramstyle     : string;
+    attribute syn_ramstyle of data_array : signal is g_storage_lat ;
 
     signal rd_en_flt    : std_logic;
     signal rd_enable    : std_logic;
@@ -50,13 +56,14 @@ architecture  rtl  of  sync_fifo  is
     signal wr_pnt       : integer range 0 to g_depth-1;
 
     signal num_el       : integer range 0 to g_depth;
-    signal full_i       : std_logic;
-    signal empty_i      : std_logic;
-    signal valid_i      : std_logic;
+    signal full_i       : std_logic := '0';
+    signal empty_i      : std_logic := '1';
+    signal valid_i      : std_logic := '0';
 begin
 
     -- Check generic values (also for synthesis)
     assert(g_threshold <= g_depth) report "Invalid parameter 'g_threshold'" severity failure;
+    assert(g_threshold_low <= g_depth) report "Invalid parameter 'g_threshold_low'" severity failure;
 
     -- Filter fifo read/write enables for full/empty conditions
     rd_en_flt <= '1' when (empty_i = '0') and (rd_en='1') else '0';    
@@ -88,7 +95,7 @@ begin
         if rising_edge(clock) then
 
             -- data on the output becomes valid after an external read OR after an automatic read when fifo is not empty.
-            if rd_en = '1' then
+            if rd_en = '1' or reset = '1' then -- fix?!
                 valid_i <= not empty_i;
             elsif valid_i = '0' and empty_i = '0' and g_fall_through then
                 valid_i <= '1';
@@ -123,6 +130,11 @@ begin
             almost_full <= '0';
             if (v_new_cnt >= g_threshold) then
                 almost_full <= '1';
+            end if;
+
+            almost_empty <= '0';
+            if (v_new_cnt < g_threshold_low) then
+                almost_empty <= '1';
             end if;
 
             empty_i <= '0';

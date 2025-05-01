@@ -9,6 +9,7 @@
 #include "userinterface.h"
 #include "subsys.h"
 #include "userinterface.h"
+#include "c64.h"
 
 ConfigIO::ConfigIO()
 {
@@ -26,6 +27,7 @@ void ConfigIO :: create_task_items(void)
     myActions.savefile  = new Action("Save to File", ConfigIO :: S_save_to_file, 0, 0);
     myActions.loadcfg   = new Action("Reset from Flash", ConfigIO :: S_restore, 0, 0);
     myActions.factory   = new Action("Reset to Defaults", ConfigIO :: S_reset, 0, 0);
+    myActions.clr_flash = new Action("Clear Flash Config", ConfigIO :: S_clear, 0, 0);
     myActions.clear_dbg = new Action("Clear Debug Log", ConfigIO :: S_reset_log, 0, 0);
     myActions.save_dbg  = new Action("Save Debug Log", ConfigIO :: S_save_log, 0, 0);
 
@@ -34,6 +36,7 @@ void ConfigIO :: create_task_items(void)
     cfg->append(myActions.savefile);
     cfg->append(myActions.loadcfg);
     cfg->append(myActions.factory);
+    cfg->append(myActions.clr_flash);
 
     TaskCategory *dev = TasksCollection :: getCategory("Developer", SORT_ORDER_DEVELOPER);
     dev->append(myActions.clear_dbg);
@@ -43,24 +46,22 @@ void ConfigIO :: create_task_items(void)
 void ConfigIO :: update_task_items(bool writablePath, Path *path)
 {
     if (writablePath) {
-        myActions.savecfg  ->enable();
         myActions.savefile ->enable();
         myActions.save_dbg ->enable();
     } else {
-        myActions.savecfg  ->disable();
         myActions.savefile ->disable();
         myActions.save_dbg ->disable();
     }
 }
 
-int ConfigIO :: S_reset_log(SubsysCommand *cmd)
+SubsysResultCode_e ConfigIO :: S_reset_log(SubsysCommand *cmd)
 {
     extern StreamTextLog textLog; // the global log
     textLog.Reset();
-    return 0;
+    return SSRET_OK;
 }
 
-int ConfigIO :: S_save_log(SubsysCommand *cmd)
+SubsysResultCode_e ConfigIO :: S_save_log(SubsysCommand *cmd)
 {
     extern StreamTextLog textLog; // the global log
     int len = textLog.getLength();
@@ -76,17 +77,20 @@ int ConfigIO :: S_save_log(SubsysCommand *cmd)
         FRESULT fres = fm->fopen(cmd->path.c_str(), buffer, FA_WRITE | FA_CREATE_ALWAYS, &f);
         if (fres == FR_OK) {
             uint32_t transferred = 0;
-            f->write(textLog.getText(), len, &transferred);
+            fres = f->write(textLog.getText(), len, &transferred);
             fm->fclose(f);
+            return (fres == FR_OK) ? SSRET_OK : SSRET_DISK_ERROR;
         } else {
             sprintf(buffer, "Error: %s", FileSystem::get_error_string(fres));
             cmd->user_interface->popup(buffer, BUTTON_OK);
+            return SSRET_CANNOT_OPEN_FILE;
         }
+    } else {
+        return SSRET_ABORTED_BY_USER;
     }
-    return 0;
 }
 
-int ConfigIO :: S_save_to_file(SubsysCommand *cmd)
+SubsysResultCode_e ConfigIO :: S_save_to_file(SubsysCommand *cmd)
 {
     char buffer[64];
     buffer[0] = 0;
@@ -99,14 +103,17 @@ int ConfigIO :: S_save_to_file(SubsysCommand *cmd)
     if (res > 0) {
         FRESULT fres = fm->fopen(cmd->path.c_str(), buffer, FA_WRITE | FA_CREATE_ALWAYS, &f);
         if (fres == FR_OK) {
-            S_write_to_file(f);
+            S_write_to_file(f); // FIXME? Cannot fail?
             fm->fclose(f);
         } else {
             sprintf(buffer, "Error: %s", FileSystem::get_error_string(fres));
             cmd->user_interface->popup(buffer, BUTTON_OK);
+            return SSRET_CANNOT_OPEN_FILE;
         }
+    } else {
+        return SSRET_ABORTED_BY_USER;
     }
-    return 0;
+    return SSRET_OK;
 }
 
 void ConfigIO :: S_write_to_file(File *f)
@@ -121,7 +128,7 @@ void ConfigIO :: S_write_to_file(File *f)
     }
 }
 
-int ConfigIO :: S_save(SubsysCommand *cmd)
+SubsysResultCode_e ConfigIO :: S_save(SubsysCommand *cmd)
 {
     ConfigManager *cm = ConfigManager :: getConfigManager();
     ConfigStore *s;
@@ -132,14 +139,14 @@ int ConfigIO :: S_save(SubsysCommand *cmd)
         }
     }
     cmd->user_interface->popup("Configuration saved.", BUTTON_OK);
-    return 0;
+    return SSRET_OK;
 }
 
-int ConfigIO :: S_reset(SubsysCommand *cmd)
+SubsysResultCode_e ConfigIO :: S_reset(SubsysCommand *cmd)
 {
     int res = cmd->user_interface->popup("Are you sure to clear settings?", BUTTON_YES | BUTTON_NO);
     if (res != BUTTON_YES) {
-        return 0;
+        return SSRET_ABORTED_BY_USER;
     }
     ConfigManager *cm = ConfigManager :: getConfigManager();
     ConfigStore *s;
@@ -149,19 +156,43 @@ int ConfigIO :: S_reset(SubsysCommand *cmd)
         s->write();
         s->effectuate();
     }
-    return 0;
+    return SSRET_OK;
 }
 
-int ConfigIO :: S_restore(SubsysCommand *cmd)
+SubsysResultCode_e ConfigIO :: S_clear(SubsysCommand *cmd)
+{
+    Flash *fl = get_flash();
+    if (!fl) {
+        return SSRET_INTERNAL_ERROR;
+    }
+    int res = cmd->user_interface->popup("Sure to clear config flash?", BUTTON_YES | BUTTON_NO);
+    if (res != BUTTON_YES) {
+        return SSRET_ABORTED_BY_USER;
+    }
+    int num = fl->get_number_of_config_pages();
+    for (int i=0; i < num; i++) {
+        fl->clear_config_page(i);
+    }
+    res = cmd->user_interface->popup("Cold Boot Required!", BUTTON_OK | BUTTON_CANCEL);
+    if (res == BUTTON_OK) {
+        SubsysCommand *off = new SubsysCommand(cmd->user_interface, SUBSYSID_C64, MENU_C64_POWEROFF, 0, NULL, 0);
+        off->execute();
+    }
+    return SSRET_OK;
+}
+
+SubsysResultCode_e ConfigIO :: S_restore(SubsysCommand *cmd)
 {
     ConfigManager *cm = ConfigManager :: getConfigManager();
     ConfigStore *s;
     for(int n = 0; n < cm->stores.get_elements();n++) {
         s = cm->stores[n];
         s->read(false);
-        s->effectuate();
+        if (!cm->safeMode) {
+            s->effectuate();
+        }
     }
-    return 0;
+    return SSRET_OK;
 }
 
 void ConfigIO :: S_write_store_to_file(ConfigStore *st, File *f)
@@ -178,7 +209,7 @@ void ConfigIO :: S_write_store_to_file(ConfigStore *st, File *f)
     for(int n = 0; n < st->items.get_elements(); n++) {
         i = st->items[n];
         len = 0;
-        if(i->definition->type == CFG_TYPE_STRING) {
+        if ((i->definition->type == CFG_TYPE_STRING) || (i->definition->type == CFG_TYPE_STRFUNC)) {
             len = sprintf(buffer, "%s=%s\n", i->definition->item_text, i->string);
         } else if(i->definition->type == CFG_TYPE_ENUM) {
             len = sprintf(buffer, "%s=%s\n", i->definition->item_text, i->definition->items[i->getValue()]);
@@ -227,7 +258,7 @@ bool ConfigIO :: S_read_from_file(File *f, StreamTextLog *log)
             for(int i=1;i<128;i++) {
                 if (line[i] == ']') {
                     line[i] = 0;
-                    store = S_find_store(cm, line + 1);
+                    store = cm->find_store(line + 1);
                     if (!store) {
                         log->format("Line %d: Store name '%s' not found.\n", linenr, line + 1);
                     }
@@ -247,17 +278,6 @@ bool ConfigIO :: S_read_from_file(File *f, StreamTextLog *log)
         }
     }
     return allOK;
-}
-
-ConfigStore *ConfigIO :: S_find_store(ConfigManager *cm, char *storename)
-{
-    for(int i=0; i < cm->stores.get_elements(); i++) {
-        ConfigStore *st = cm->stores[i];
-        if (strcasecmp(st->store_name.c_str(), storename) == 0) {
-            return st;
-        }
-    }
-    return NULL;
 }
 
 bool ConfigIO :: S_read_store_element(ConfigStore *st, const char *line, int linenr, StreamTextLog *log)
@@ -284,13 +304,7 @@ bool ConfigIO :: S_read_store_element(ConfigStore *st, const char *line, int lin
         return false;
     }
     // now look for the store element with the itemname
-    ConfigItem *item = 0;
-    for(int n = 0; n < st->items.get_elements(); n++) {
-        if (strcasecmp(itemname, st->items[n]->definition->item_text) == 0) {
-            item = st->items[n];
-            break;
-        }
-    }
+    ConfigItem *item = st->find_item(itemname);
     if (!item) {
         log->format("Line %d: Item '%s' not found in this store [%s].\n", linenr, itemname, st->store_name.c_str());
         return false;
@@ -306,7 +320,7 @@ bool ConfigIO :: S_read_store_element(ConfigStore *st, const char *line, int lin
             st->staleEffect = true;
             st->staleFlash = true;
         }
-    } else if (item->definition->type == CFG_TYPE_STRING) {
+    } else if ((item->definition->type == CFG_TYPE_STRING) || (item->definition->type == CFG_TYPE_STRFUNC)) {
         if (strncmp(item->string, valuestr, item->definition->max) != 0) {
             strncpy(item->string, valuestr, item->definition->max);
             st->staleEffect = true;

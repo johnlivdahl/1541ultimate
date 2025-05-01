@@ -8,9 +8,16 @@
 #include "profiler.h"
 #include "FreeRTOS.h"
 #include "task.h"
+#include "endianness.h"
 
 #define DEBUG_RAW_PKT 0
 #define DEBUG_INVALID_PKT 0
+
+#if DATACACHE
+#define BIT31 0x80000000
+#else
+#define BIT31 0
+#endif
 
 uint8_t c_req_phy_access[]    = { 0x40, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
 uint8_t c_read_phy_reg[8]     = { 0xC0, 0x07, 0x10, 0x00, 0xFF, 0x00, 0x02, 0x00 };
@@ -58,27 +65,6 @@ const uint16_t good_srom[] = {
 	0x2E00, 0x1203, 0x4100, 0x5800, 0x3800, 0x3800, 0x7800, 0x3700,
 	0x3200, 0x4100, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF };
 
-__inline uint32_t cpu_to_32le(uint32_t a)
-{
-#ifdef NIOS
-	return a;
-#else
-	uint32_t m1, m2;
-    m1 = (a & 0x00FF0000) >> 8;
-    m2 = (a & 0x0000FF00) << 8;
-    return (a >> 24) | (a << 24) | m1 | m2;
-#endif
-}
-
-__inline uint16_t le16_to_cpu(uint16_t h)
-{
-#ifdef NIOS
-	return h;
-#else // assume big endian
-    return (h >> 8) | (h << 8);
-#endif
-}
-
 // Entry point for call-backs.
 void UsbAx88772Driver_interrupt_callback(void *object) {
 	((UsbAx88772Driver *)object)->interrupt_handler();
@@ -95,7 +81,7 @@ void UsbAx88772Driver_free_buffer(void *drv, void *b) {
 }
 
 // entry point for output packet callback
-uint8_t UsbAx88772Driver_output(void *drv, void *b, int len) {
+err_t UsbAx88772Driver_output(void *drv, void *b, int len) {
 	return ((UsbAx88772Driver *)drv)->output_packet((uint8_t *)b, len);
 }
 
@@ -118,7 +104,7 @@ UsbAx88772Driver :: UsbAx88772Driver(UsbInterface *intf, uint16_t prodID) : UsbD
     dataBuffersBlock = new uint8_t[1536 * NUM_BUFFERS];
 
     for (int i=0; i < NUM_BUFFERS; i++) {
-        freeBuffers.push(&dataBuffersBlock[0x80000000 + 1536 * i]); // set bit 31, so that it is non-cacheable
+        freeBuffers.push(&dataBuffersBlock[BIT31 + 1536 * i]); // set bit 31, so that it is non-cacheable
     }
 }
 
@@ -135,12 +121,12 @@ UsbDriver * UsbAx88772Driver :: test_driver(UsbInterface *intf)
 
 	UsbDevice *dev = intf->getParentDevice();
 	if(le16_to_cpu(dev->device_descr.vendor) != 0x0b95) {
-		printf("Device is not from Asix..\n");
+		// printf("Device is not from Asix..\n");
 		return 0;
 	}
     uint16_t prodID = le16_to_cpu(dev->device_descr.product);
     if (((prodID & 0xFFFE) != 0x772A) && (prodID != 0x7720)) {
-		printf("Device product ID is not AX88772.\n");
+		// printf("Device product ID is not AX88772.\n");
 		return 0;
 	}
 
@@ -374,8 +360,7 @@ uint16_t UsbAx88772Driver :: read_phy_register(uint8_t reg) {
 
 void UsbAx88772Driver :: poll(void)
 {
-	if(netstack)
-		netstack->poll();
+
 }
 
 void UsbAx88772Driver :: interrupt_handler()
@@ -612,11 +597,11 @@ void UsbAx88772Driver :: pipe_error(int pipe) // called from IRQ!
 }
 
 
-uint8_t UsbAx88772Driver :: output_packet(uint8_t *buffer, int pkt_len)
+err_t UsbAx88772Driver :: output_packet(uint8_t *buffer, int pkt_len)
 {
 	//printf("OUTPUT: payload = %p. Size = %d\n", buffer, pkt_len);
 	if (!link_up)
-		return 0;
+		return ERR_CONN;
 	//dump_hex(buffer, 32);
 
 	uint8_t *size = buffer - 4;
@@ -627,7 +612,7 @@ uint8_t UsbAx88772Driver :: output_packet(uint8_t *buffer, int pkt_len)
 
 	host->bulk_out(&bulk_out_pipe, size, pkt_len + 4);
 
-	return 0;
+	return ERR_OK;
 }
 
 uint8_t *UsbAx88772Driver :: getBuffer()

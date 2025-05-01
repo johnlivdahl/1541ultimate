@@ -56,34 +56,44 @@ FileTypePRG :: ~FileTypePRG()
 {
 }
 
-int FileTypePRG :: fetch_context_items(IndexedList<Action *> &list)
+int FileTypePRG::fetch_context_items(IndexedList<Action *> &list)
 {
-	int mode = (has_header)?1:0;
+    int mode = (has_header) ? 1 : 0;
 
-	int count = 0;
-    C64 *machine = C64 :: getMachine();
-	if (!machine->exists()) {
-		return 0;
-	}
+    int count = 0;
+    C64 *machine = C64::getMachine();
+    if (!machine->exists()) {
+        return 0;
+    }
 
-	list.append(new Action("Run",  FileTypePRG :: execute_st, PRGFILE_RUN, mode));
-	list.append(new Action("Load", FileTypePRG :: execute_st, PRGFILE_LOAD, mode));
-	list.append(new Action("DMA",  FileTypePRG :: execute_st, PRGFILE_DMAONLY, mode));
-	count += 3;
+    list.append(new Action("Run", FileTypePRG::execute_st, PRGFILE_RUN, mode));
+    list.append(new Action("Load", FileTypePRG::execute_st, PRGFILE_LOAD, mode));
+    list.append(new Action("DMA", FileTypePRG::execute_st, PRGFILE_DMAONLY, mode));
+    count += 3;
 
-	if (!c1541_A)
-		return count;
+    if (!c1541_A)
+        return count;
 
-	BrowsableDirEntry *parentEntry = (BrowsableDirEntry *)(node->getParent());
-	FileInfo *parentInfo = parentEntry->getInfo();
+    BrowsableDirEntry *parentEntry = (BrowsableDirEntry *)(node->getParent());
+    FileInfo *parentInfo = parentEntry->getInfo();
 
-	if (strcasecmp("D64", parentInfo->extension) == 0) {
-	    // if this file is inside of a D64.
-        list.append(new Action("Mount & Run", FileTypePRG :: execute_st, PRGFILE_MOUNT_RUN, mode));
+    int image = 0;
+    if (strcasecmp("D64", parentInfo->extension) == 0) {
+        image = 1541;
+    } else if (strcasecmp("D71", parentInfo->extension) == 0) {
+        image = 1571;
+    } else if (strcasecmp("D81", parentInfo->extension) == 0) {
+        image = 1581;
+    }
+
+    if (image) {
+        // if this file is inside of a disk image. Note that header mode gets lost; this is OK
+        // since there are no Pxx files inside of a disk image
+        list.append(new Action("Mount & Run", FileTypePRG::execute_st, PRGFILE_MOUNT_RUN, image));
         count++;
-        list.append(new Action("Real Run", FileTypePRG :: execute_st, PRGFILE_MOUNT_REAL_RUN, mode));
+        list.append(new Action("Real Run", FileTypePRG::execute_st, PRGFILE_MOUNT_REAL_RUN, image));
         count++;
-	}
+    }
     return count;
 }
 
@@ -116,7 +126,7 @@ bool FileTypePRG :: check_header(File *f, bool has_header)
     return true;        
 }
 
-int FileTypePRG :: execute_st(SubsysCommand *cmd)
+SubsysResultCode_e FileTypePRG :: execute_st(SubsysCommand *cmd)
 {
 	printf("PRG Select: %4x\n", cmd->functionID);
 	File *file = 0, *d64;
@@ -125,6 +135,8 @@ int FileTypePRG :: execute_st(SubsysCommand *cmd)
 	SubsysCommand *c64_command;
 	
     int run_code = -1;
+    int menu_action = MENU_HIDE;
+
 	switch(cmd->functionID) {
 	case PRGFILE_RUN:
         run_code = RUNCODE_DMALOAD_RUN;
@@ -140,42 +152,52 @@ int FileTypePRG :: execute_st(SubsysCommand *cmd)
         break;
     case PRGFILE_DMAONLY:
     	run_code = 0;
+        menu_action = MENU_NOP;
     	break;
     default:
-        return -1;
+        return SSRET_UNDEFINED_COMMAND;
     }
 
     const char *name = cmd->filename.c_str();
     printf("DMA Load.. %s\n", name);
     FileManager *fm = FileManager :: getFileManager();
     FRESULT fres = fm->fopen(cmd->path.c_str(), name, FA_READ, &file);
-    if(file) {
-        if(check_header(file, cmd->mode)) {
+    if (file) {
+        if (check_header(file, (cmd->mode == 1))) {
 
             if (run_code & RUNCODE_MOUNT_BIT) {
-            	printf("Runcode mount bit set. trying to find mount point '%s' resulted: ", cmd->path.c_str());
-            	FileInfo info(32);
-            	fres = fm->fstat(cmd->path.c_str(), info);
-            	printf("%s\n", FileSystem :: get_error_string(fres));
+                printf("Runcode mount bit set. trying to find mount point '%s' resulted: ", cmd->path.c_str());
+                FileInfo info(32);
+                fres = fm->fstat(cmd->path.c_str(), info);
+                printf("%s\n", FileSystem::get_error_string(fres));
 
-            	printf("Mounting %s to drive A\n", cmd->path.c_str());
-                drive_command = new SubsysCommand(cmd->user_interface, SUBSYSID_DRIVE_A, MENU_1541_MOUNT, 0, 0, cmd->path.c_str());
+                printf("Mounting %s to drive A\n", cmd->path.c_str());
+                drive_command = new SubsysCommand(cmd->user_interface, SUBSYSID_DRIVE_A, MENU_1541_MOUNT_D64, cmd->mode, 0, cmd->path.c_str());
                 drive_command->execute();
                 c64_command = new SubsysCommand(cmd->user_interface, SUBSYSID_C64, C64_DMA_LOAD_MNT, run_code, cmd->path.c_str(), cmd->filename.c_str());
             } else if (run_code) {
-            	c64_command = new SubsysCommand(cmd->user_interface, SUBSYSID_C64, C64_DMA_LOAD, run_code, cmd->path.c_str(), cmd->filename.c_str());
+                c64_command = new SubsysCommand(cmd->user_interface, SUBSYSID_C64, C64_DMA_LOAD, run_code, cmd->path.c_str(), cmd->filename.c_str());
             } else {
-            	c64_command = new SubsysCommand(cmd->user_interface, SUBSYSID_C64, C64_DMA_LOAD_RAW, run_code, cmd->path.c_str(), cmd->filename.c_str());
+                c64_command = new SubsysCommand(cmd->user_interface, SUBSYSID_C64, C64_DMA_LOAD_RAW, run_code, cmd->path.c_str(), cmd->filename.c_str());
             }
-        	c64_command->execute();
-
+            c64_command->execute();
+            if (cmd->user_interface) {
+                cmd->user_interface->menu_response_to_action = menu_action;
+            }
         } else {
             printf("Header of P00 file not correct.\n");
             fm->fclose(file);
         }
     } else {
-        printf("Error opening file. %s\n", FileSystem :: get_error_string(fres));
-        return -2;
+        printf("Error opening file. %s\n", FileSystem::get_error_string(fres));
+        return SSRET_CANNOT_OPEN_FILE;
     }
-    return 0;
+    return SSRET_OK;
+}
+
+SubsysResultCode_t FileTypePRG :: start_prg(const char *filename, bool run)
+{
+    int func = run ? RUNCODE_DMALOAD_RUN : RUNCODE_DMALOAD;
+    SubsysCommand *c64_command = new SubsysCommand(NULL, SUBSYSID_C64, C64_DMA_LOAD, func, "", filename);
+    return c64_command->execute(); 
 }

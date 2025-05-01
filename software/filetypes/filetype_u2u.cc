@@ -65,8 +65,13 @@ int FileTypeUpdate :: fetch_context_items(IndexedList<Action *> &list)
 FileType *FileTypeUpdate :: test_type(BrowsableDirEntry *br)
 {
 	FileInfo *inf = br->getInfo();
+#ifdef RISCV
+	if(strcmp(inf->extension, "U2R")==0)
+        return new FileTypeUpdate(br);
+#else
 	if(strcmp(inf->extension, "U2U")==0)
         return new FileTypeUpdate(br);
+#endif
     return NULL;
 }
 
@@ -82,7 +87,7 @@ void jump_run(uint32_t a)
     	;
 }
 
-int FileTypeUpdate :: execute(SubsysCommand *cmd)
+SubsysResultCode_e FileTypeUpdate :: execute(SubsysCommand *cmd)
 {
 	File *file = 0;
 	uint32_t bytes_read;
@@ -140,8 +145,8 @@ int FileTypeUpdate :: execute(SubsysCommand *cmd)
 	} else {
 		printf("Error opening file.\n");
         cmd->user_interface->popup(FileSystem :: get_error_string(fres), BUTTON_OK);
-		return -1;
+		return SSRET_CANNOT_OPEN_FILE;
 	}
-	return 0;
+	return SSRET_OK;
 }
 

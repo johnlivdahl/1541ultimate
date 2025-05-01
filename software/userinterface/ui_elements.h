@@ -13,8 +13,6 @@
 #include "keyboard.h"
 #include "mystring.h"
 
-#define NUM_BUTTONS 5
-
 #define BUTTON_OK     0x01
 #define BUTTON_YES    0x02
 #define BUTTON_NO     0x04
@@ -23,8 +21,12 @@
 
 class UIObject
 {
+    bool autoCleanup;
 public:
-    UIObject() { }
+    UIObject() { autoCleanup = false; }
+    void setCleanup() { autoCleanup = true; }
+    bool needCleanup() { return autoCleanup; }
+
     virtual ~UIObject() { }
 
     virtual void init(Screen *scr, Keyboard *key) { }
@@ -46,17 +48,20 @@ private:
     mstring   message;
     uint8_t buttons;
 
-    uint8_t button_key[NUM_BUTTONS];
+    uint8_t button_key[8];
     int  btns_active;
     int  active_button;
     int  button_start_x;
     Window  *window;
     Keyboard *keyboard;
+    const char **button_names;
+    const char *button_keys;
+    const int button_count; 
 
     void draw_buttons();
 
 public:
-    UIPopup(const char *msg, uint8_t flags);
+    UIPopup(const char *msg, uint8_t flags, int count, const char **names, const char *keys);
     ~UIPopup() { }
 
     void init(Screen *screen, Keyboard *keyb);
@@ -64,26 +69,43 @@ public:
     int  poll(int);
 };
 
-class UIStringBox : public UIObject
+class UIStringEdit
 {
 private:
-    mstring   message;
     Window   *window;
     Keyboard *keyboard;
+    int   win_xoffs, win_yoffs;
 
     int   cur;
     int   len;
+    int   max_chars; // maximum number of chars shown at once
+    int   edit_offs; // offset in string being edited (scrolling)
 
     // destination
     int   max_len;
     char *buffer;
+public:
+    UIStringEdit(char *buf, int max);
+    ~UIStringEdit() { }
+
+    void init(Window *win, Keyboard *keyb, int x_offs, int y_offs, int max_chars);
+    int  poll(int);
+    int  get_max_len() { return max_len; }
+};
+
+class UIStringBox : public UIObject
+{
+private:
+    mstring message;
+    UIStringEdit edit;
+    Window *window;
 public:
     UIStringBox(const char *msg, char *buf, int max);
     ~UIStringBox() { }
 
     void init(Screen *screen, Keyboard *keyb);
     void deinit(void);
-    int  poll(int);
+    int  poll(int a) { return edit.poll(a); }
 };
 
 class UIStatusBox : public UIObject

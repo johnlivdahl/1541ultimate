@@ -26,6 +26,8 @@ FileSystemCBM::FileSystemCBM(Partition *p, bool writable, const int *lay) :
     current_sector = -1;
     dirty = 0;
     this->writable = writable;
+    root_buffer = new uint8_t[256];
+    sect_buffer = new uint8_t[256];
 
     p->ioctl(GET_SECTOR_COUNT, &num_sectors);
     root_dirty = false;
@@ -37,6 +39,8 @@ FileSystemCBM::FileSystemCBM(Partition *p, bool writable, const int *lay) :
 
 FileSystemCBM::~FileSystemCBM()
 {
+    delete[] sect_buffer;
+    delete[] root_buffer;
 }
 
 bool FileSystemCBM::is_writable()
@@ -243,6 +247,7 @@ FRESULT FileSystemCBM::sync(void)
         }
         root_dirty = false;
     }
+    prt->ioctl(CTRL_SYNC, NULL);
     return FR_OK;
 }
 
@@ -474,12 +479,36 @@ FRESULT FileSystemCBM::file_open(const char *pathname, uint8_t flags, File **fil
 
 FRESULT FileSystemCBM::file_rename(const char *old_name, const char *new_name)
 {
+    PathInfo pi(this);
+    pi.init(old_name);
+    PathStatus_t pres = walk_path(pi);
+    if (pres == e_DirNotFound) {
+        return FR_NO_PATH;
+    }
+    if (pres != e_EntryFound) {
+        return FR_NO_FILE;
+    }
+    const char *filename = pi.getFileName();
+
+    DirInCBM *dd = new DirInCBM(this, pi.getParentInfo()->cluster);
+    FileInfo info(20);
+    FRESULT res = find_file(filename, dd, &info);
+
+/*
     FileInfo info(20);
     DirInCBM *dd = new DirInCBM(this);
     FRESULT res = find_file(old_name, dd, &info);
+*/
 
-    if (new_name[0] == '/')
-        new_name++;
+    {
+        const char *p = new_name;
+        while (*p)
+        {
+            if (*p == '/')
+                new_name = p + 1;
+            p++;
+        }
+    }
 
     CbmFileName cbm;
 
@@ -759,6 +788,11 @@ FRESULT FileSystemD71::format(const char *name)
     set_sector_allocation(root_track, root_sector+1, true);
     set_sector_allocation(dir_track, dir_sector, true);
 
+    // allocate the track on side 1 with extended directory sectors
+    for(int i=0; i < 19; i++) {
+        set_sector_allocation(53, i, true);
+    }
+
     // mark sectors as modified
     root_dirty = true;
     bam2_dirty = true;
@@ -841,7 +875,7 @@ FRESULT FileSystemDNP::format(const char *name)
     bam_buffer[4] = root_buffer[22];
     bam_buffer[5] = root_buffer[23];
     bam_buffer[6] = 0xC0; // verify on
-    bam_buffer[7] = (uint8_t )((num_sectors + 255) / 256); // num tracks
+    bam_buffer[8] = (uint8_t )((num_sectors + 255) / 256); // num tracks
 
     int bam_bytes = num_sectors / 8;
     bam_buffer[36] = 0x1F; // in total 32+3 blocks in use after format
@@ -869,7 +903,7 @@ bool FileSystemD64::set_sector_allocation(int track, int sector, bool alloc)
 {
     uint8_t *m = &root_buffer[4 * track];
     bool success = modify_allocation_bit(m, m+1, sector, alloc);
-    root_dirty = success;
+    root_dirty |= success;
     return success;
 }
 
@@ -909,7 +943,7 @@ bool FileSystemD81::set_sector_allocation(int track, int sector, bool alloc)
     m = fr + 1;
 
     bool success = modify_allocation_bit(fr, m, sector, alloc);
-    bam_dirty = success;
+    bam_dirty |= success;
     return success;
 }
 
@@ -1087,7 +1121,7 @@ bool FileSystemDNP::get_next_free_sector(int &track, int &sector)
 
 
 // Get number of free sectors on the file system
-FRESULT FileSystemD64::get_free(uint32_t *a)
+FRESULT FileSystemD64::get_free(uint32_t *a, uint32_t *cs)
 {
     if (!root_valid) {
         return FR_NO_FILESYSTEM;
@@ -1099,11 +1133,12 @@ FRESULT FileSystemD64::get_free(uint32_t *a)
         }
     }
     *a = f;
+    *cs = 256;
     return FR_OK;
 }
 
 // Get number of free sectors on the file system
-FRESULT FileSystemD71::get_free(uint32_t *a)
+FRESULT FileSystemD71::get_free(uint32_t *a, uint32_t *cs)
 {
     if (!root_valid) {
         return FR_NO_FILESYSTEM;
@@ -1120,11 +1155,12 @@ FRESULT FileSystemD71::get_free(uint32_t *a)
         }
     }
     *a = f;
+    *cs = 256;
     return FR_OK;
 }
 
 // Get number of free sectors on the file system
-FRESULT FileSystemD81::get_free(uint32_t *a)
+FRESULT FileSystemD81::get_free(uint32_t *a, uint32_t *cs)
 {
     if (!bam_valid) {
         return FR_NO_FILESYSTEM;
@@ -1139,10 +1175,11 @@ FRESULT FileSystemD81::get_free(uint32_t *a)
         f += bam_buffer[0x110 + 6 * (i - 41)];
     }
     *a = f;
+    *cs = 256;
     return FR_OK;
 }
 
-FRESULT FileSystemDNP::get_free(uint32_t *a)
+FRESULT FileSystemDNP::get_free(uint32_t *a, uint32_t *cs)
 {
     if (!bam_valid) {
         return FR_NO_FILESYSTEM;
@@ -1163,6 +1200,7 @@ FRESULT FileSystemDNP::get_free(uint32_t *a)
         }
     }
     *a = f;
+    *cs = 256;
     return FR_OK;
 }
 
@@ -1186,6 +1224,7 @@ FRESULT FileSystemDNP :: sync(void)
         bam += 512;
     }
     bam_dirty = 0;
+    prt->ioctl(CTRL_SYNC, NULL);
     return fres;
 }
 
@@ -1588,14 +1627,14 @@ FRESULT FileInCBM::open(uint8_t flags)
             // CVT
             state = ST_HEADER;
             header.data = new uint8_t[4*254];
-            bzero(header.data, 4*254);
+            memset(header.data, 0, 4*254);
             header.size = create_cvt_header();
             header.pos = 0;
         }
     } else if ((tp == 7) && (flags & FA_CREATE_ANY)) { // creating a new CVT file; see hack in the 'create' function of DirInCBM.
     	state = ST_HEADER;
         header.data = new uint8_t[254];
-        bzero(header.data, 254);
+        memset(header.data, 0, 254);
         header.size = 254;
         header.pos = 0;
 
@@ -1871,7 +1910,7 @@ FRESULT FileInCBM::fixup_cvt(void)
 	track = fs->sect_buffer[0];
 	sector = fs->sect_buffer[1];
 
-	bzero(cvt->sections, sizeof(cvt->sections));
+	memset(cvt->sections, 0, sizeof(cvt->sections));
 	uint8_t *vlir = fs->sect_buffer + 2;
 
 	cvt->records = 127;

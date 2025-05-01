@@ -53,6 +53,10 @@
 
 #define CMD_TARGET_NONE 0xFF
 
+#define CMD_MAX_COMMAND_LEN 896
+#define CMD_MAX_REPLY_LEN   896
+#define CMD_MAX_STATUS_LEN  256
+
 typedef struct _message
 {
     int   length;
@@ -91,6 +95,7 @@ public:
     void dump_registers(void);
     const char *identify(void) { return "Command Interface"; }
     bool is_dma_active(void);
+    void set_kernal_device_id(uint8_t id);
 };
 
 extern CommandInterface cmd_if;

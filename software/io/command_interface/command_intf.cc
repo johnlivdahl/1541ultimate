@@ -37,7 +37,7 @@ CommandInterface :: CommandInterface() : SubSystem(SUBSYSID_CMD_IF)
     for(int i=0;i<=CMD_IF_MAX_TARGET;i++)
         command_targets[i] = &cmd_if_empty_target;
 
-    if(getFpgaCapabilities() & CAPAB_COMMAND_INTF) {
+    if((getFpgaCapabilities() & CAPAB_COMMAND_INTF) && (getFpgaCapabilities() & CAPAB_CARTRIDGE)) {
         CMD_IF_SLOT_BASE = 0x47; // $DF1C
         CMD_IF_HANDSHAKE_OUT = HANDSHAKE_RESET;    
     
@@ -65,7 +65,6 @@ CommandInterface :: CommandInterface() : SubSystem(SUBSYSID_CMD_IF)
     }
     target = CMD_TARGET_NONE;
     cart_mode = 0;
-
 }
 
 CommandInterface :: ~CommandInterface()
@@ -189,6 +188,11 @@ void CommandInterface :: copy_result(Message *data, Message *status)
 bool CommandInterface :: is_dma_active(void)
 {
     return ((CMD_IF_HANDSHAKE_OUT & CMD_HS_DMA_ACTIVE) != 0);
+}
+
+void CommandInterface :: set_kernal_device_id(uint8_t id)
+{
+    CMD_IF_SLOT_ENABLE = 0x80 | id;
 }
 
 void CommandInterface :: dump_registers(void)

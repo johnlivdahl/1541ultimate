@@ -4026,7 +4026,10 @@ FRESULT f_write (
 						clst = create_chain(&fp->obj, fp->clust);	/* Follow or stretch cluster chain on the FAT */
 					}
 				}
-				if (clst == 0) break;		/* Could not allocate a new cluster (disk full) */
+				if (clst == 0) {
+				    fp->flag |= FA_MODIFIED;        /* Set file change flag */
+				    ABORT(fs, FR_DISK_FULL);		/* Could not allocate a new cluster (disk full) */
+				}
 				if (clst == 1) ABORT(fs, FR_INT_ERR);
 				if (clst == 0xFFFFFFFF) ABORT(fs, FR_DISK_ERR);
 				fp->clust = clst;			/* Update current cluster */
@@ -4821,18 +4824,85 @@ FRESULT f_getfree (
 
 					clst = fs->n_fatent - 2;	/* Number of clusters */
 					sect = fs->bitbase;			/* Bitmap sector */
-					i = 0;						/* Offset in the sector */
-					do {	/* Counts numbuer of bits with zero in the bitmap */
-						if (i == 0) {
-							res = move_window(fs, sect++);
-							if (res != FR_OK) break;
+
+					/* Prepare a lookup table to speed up free cluster calculation */
+					BYTE lookup[256];
+					BYTE num_zero_bits;
+					for (i = 0; i < 256; ++i) {
+						num_zero_bits = 0;
+						for (b = 0x01; b < 0xff; b <<= 1) {
+							if (!(i&b)) {
+								++num_zero_bits;
+							}
 						}
-						for (b = 8, bm = fs->win[i]; b && clst; b--, clst--) {
-							if (!(bm & 1)) nfree++;
-							bm >>= 1;
+						lookup[i] = num_zero_bits;
+					}
+
+					/* Determine how many clusters and sectors fit in the full buffer */
+					BYTE *buf = fs->win;
+					UINT buf_sz = sizeof(fs->win);
+					UINT sector_size = SS(fs);
+					UINT sector_clusters = sector_size * 8;
+					UINT buf_sectors = buf_sz / sector_size;
+					UINT buf_clusters = buf_sectors * sector_clusters;
+					UINT sectors;
+					UINT clusters;
+					BYTE *bitmap;
+#if !FF_FS_READONLY
+					/* Flush the window buffer (we will read into the buffer directly) */
+					res = sync_window(fs);
+#endif
+					/* Count number of zero-bits in the bitmap */
+					while (res == FR_OK && clst > 0) {
+						/* Determine how many sectors to read */
+						if (clst >= buf_clusters) {
+							clusters = buf_clusters;
+							sectors = buf_sectors;
 						}
-						i = (i + 1) % SS(fs);
-					} while (clst);
+						else {
+							clusters = clst;
+							if (clst == sector_clusters) {
+								sectors = 1;
+							}
+							else {
+								sectors = (clst / sector_clusters) + 1;
+							}
+						}
+
+						/* Load up the next part of the bitmap into the buffer */
+						if (disk_read(fs->pdrv, buf, sect, sectors) != RES_OK) {
+							res = FR_INT_ERR;
+							break;
+						}
+
+						/* Update position for next (if any) iteration */
+						clst -= clusters;
+						sect += sectors;
+
+						/* Process buffered bitmap using a slighly unrolled loop */
+						bitmap = buf;
+						while (clusters >= 8*4) {
+							nfree += lookup[*bitmap++];
+							nfree += lookup[*bitmap++];
+							nfree += lookup[*bitmap++];
+							nfree += lookup[*bitmap++];
+							clusters -= 8*4;
+						}
+						while (clusters >= 8) {
+							nfree += lookup[*bitmap++];
+							clusters -= 8;
+						}
+						if (clusters > 0) {
+							/* Mask out bits outside the covered bitmap and process the last clusters */
+							bm = (0xff00 >> (8 - clusters)) & 0xff;
+							nfree += lookup[(*bitmap) | bm];
+						}
+					}
+
+					/* Make sure the window buffer has valid data again */
+					if (res == FR_OK) {
+						res = move_window(fs, 0);	/* Read first sector on disk */
+					}
 				} else
 #endif
 				{	/* FAT16/32: Scan WORD/DWORD FAT entries */
@@ -5040,7 +5110,7 @@ FRESULT f_mkdir (
 			sobj.fs = fs;						/* New object id to create a new chain */
 			dcl = create_chain(&sobj, 0);		/* Allocate a cluster for the new directory */
 			res = FR_OK;
-			if (dcl == 0) res = FR_DENIED;		/* No space to allocate a new cluster? */
+			if (dcl == 0) res = FR_DISK_FULL;	/* No space to allocate a new cluster? */
 			if (dcl == 1) res = FR_INT_ERR;		/* Any insanity? */
 			if (dcl == 0xFFFFFFFF) res = FR_DISK_ERR;	/* Disk error? */
 			tm = GET_FATTIME();
@@ -5704,7 +5774,7 @@ static FRESULT create_partition (
 
 #if FF_LBA64
 	if (sz_drv >= FF_MIN_GPT) {	/* Create partitions in GPT */
-		WORD ss;
+		DWORD ss;
 		UINT sz_pt, pi, si, ofs;
 		DWORD bcc, rnd, align;
 		QWORD s_lba64, n_lba64, sz_pool, s_bpt;
@@ -5840,7 +5910,7 @@ FRESULT f_mkfs (
 	static const WORD cst32[] = {1, 2, 4, 8, 16, 32, 0};	/* Cluster size boundary for FAT32 volume (128Ks unit) */
 	static const MKFS_PARM defopt = {FM_ANY, 0, 0, 0, 0};	/* Default parameter */
 	BYTE fsopt, fsty, sys, *buf, *pte, pdrv, ipart;
-	WORD ss;	/* Sector size */
+	DWORD ss;	/* Sector size */
 	DWORD sz_buf, sz_blk, n_clst, pau, nsect, n;
 	LBA_t sz_vol, b_vol, b_fat, b_data;		/* Size of volume, Base LBA of volume, fat, data */
 	LBA_t sect, lba[2];

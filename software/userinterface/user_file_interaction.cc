@@ -79,15 +79,16 @@ void UserFileInteraction::update_task_items(bool writablePath, Path *path)
     }
 }
 
-int UserFileInteraction::S_enter(SubsysCommand *cmd)
+SubsysResultCode_e UserFileInteraction::S_enter(SubsysCommand *cmd)
 {
     if (cmd->user_interface) {
-        return cmd->user_interface->enterSelection();
+        int retval = cmd->user_interface->enterSelection();
+        return SSRET_OK; // FIXME
     }
-    return -1;
+    return SSRET_NO_USER_INTERFACE;
 }
 
-int UserFileInteraction::S_rename(SubsysCommand *cmd)
+SubsysResultCode_e UserFileInteraction::S_rename(SubsysCommand *cmd)
 {
     int res;
     char buffer[64];
@@ -98,10 +99,10 @@ int UserFileInteraction::S_rename(SubsysCommand *cmd)
     Path *p = fm->get_new_path("S_rename");
     p->cd(cmd->path.c_str());
 
-    strncpy(buffer, cmd->filename.c_str(), 38);
-    buffer[38] = 0;
+    strncpy(buffer, cmd->filename.c_str(), 64);
+    buffer[63] = 0;
 
-    res = cmd->user_interface->string_box("Give a new name..", buffer, 38);
+    res = cmd->user_interface->string_box("Give a new name..", buffer, 63);
     if (res > 0) {
         fres = fm->rename(p, cmd->filename.c_str(), buffer);
         if (fres != FR_OK) {
@@ -110,10 +111,10 @@ int UserFileInteraction::S_rename(SubsysCommand *cmd)
         }
     }
     fm->release_path(p);
-    return 0;
+    return SSRET_OK;
 }
 
-int UserFileInteraction::S_delete(SubsysCommand *cmd)
+SubsysResultCode_e UserFileInteraction::S_delete(SubsysCommand *cmd)
 {
     char buffer[64];
     FileManager *fm = FileManager::getFileManager();
@@ -121,17 +122,17 @@ int UserFileInteraction::S_delete(SubsysCommand *cmd)
     Path *p = fm->get_new_path("S_delete");
     p->cd(cmd->path.c_str());
     if (res == BUTTON_YES) {
-        FRESULT fres = FileManager::getFileManager()->delete_file(p, cmd->filename.c_str());
+        FRESULT fres = FileManager::getFileManager()->delete_recursive(p, cmd->filename.c_str());
         if (fres != FR_OK) {
             sprintf(buffer, "Error: %s", FileSystem::get_error_string(fres));
             cmd->user_interface->popup(buffer, BUTTON_OK);
         }
     }
     fm->release_path(p);
-    return 0;
+    return SSRET_OK;
 }
 
-int UserFileInteraction::S_view(SubsysCommand *cmd)
+SubsysResultCode_e UserFileInteraction::S_view(SubsysCommand *cmd)
 {
     FileManager *fm = FileManager::getFileManager();
     File *f = 0;
@@ -146,10 +147,10 @@ int UserFileInteraction::S_view(SubsysCommand *cmd)
         cmd->user_interface->run_editor(text_buf, transferred);
         delete text_buf;
     }
-    return 0;
+    return SSRET_OK;
 }
 
-int UserFileInteraction::S_createDir(SubsysCommand *cmd)
+SubsysResultCode_e UserFileInteraction::S_createDir(SubsysCommand *cmd)
 {
     char buffer[64];
     buffer[0] = 0;
@@ -167,10 +168,10 @@ int UserFileInteraction::S_createDir(SubsysCommand *cmd)
         }
     }
     fm->release_path(path);
-    return 0;
+    return SSRET_OK;
 }
 
-int UserFileInteraction::S_runApp(SubsysCommand *cmd)
+SubsysResultCode_e UserFileInteraction::S_runApp(SubsysCommand *cmd)
 {
 #ifndef RECOVERYAPP
     printf("REU Select: %4x\n", cmd->functionID);
@@ -253,10 +254,10 @@ int UserFileInteraction::S_runApp(SubsysCommand *cmd)
     } else {
         printf("Error opening file.\n");
         cmd->user_interface->popup(FileSystem::get_error_string(fres), BUTTON_OK);
-        return -2;
+        return SSRET_DISK_ERROR;
     }
 #endif
-    return 0;
+    return SSRET_OK;
 }
 
 // TODO: Use these functions in other user-interface based subsystem calls
@@ -275,6 +276,7 @@ FRESULT create_user_file(UserInterface *ui, const char *message, const char *ext
 {
     char filename[32];
     FileManager *fm = FileManager :: getFileManager();
+    *f = NULL;
     if(ui->string_box(message, buffer, 22) > 0) {
         strcpy(filename, buffer);
         fix_filename(filename);
@@ -290,7 +292,7 @@ FRESULT write_zeros(File *f, int size, uint32_t &written)
     uint8_t *buffer = new uint8_t[16384];
     written = 0;
     uint32_t wr;
-    bzero(buffer, 16384);
+    memset(buffer, 0, 16384);
     FRESULT fres = FR_OK;
     while(size > 0) {
         int now = (size > 16384) ? 16384 : size;

@@ -24,7 +24,9 @@ extern "C" {
 }
 #include "config.h"
 #include <string.h>
+#if U64
 #include "u64.h"
+#endif
 
 /*** CONFIGURATION MANAGER ***/
 ConfigManager :: ConfigManager() : stores(16, NULL), pages(16, NULL)
@@ -38,13 +40,23 @@ ConfigManager :: ConfigManager() : stores(16, NULL), pages(16, NULL)
     	printf("ConfigManager opened flash: %p\n", flash);
     }
 	safeMode = false;
+
 #if U64
-	if (U64_RESTORE_REG == 1) {
-	    safeMode = true;
-	}
+    if (U64_RESTORE_REG == 1) {
+        safeMode = true;
+    }
 #elif SAFEMODE
     safeMode = true;
+#else
+    // If the reset button is pressed during boot, and it's not U64, then
+    // safe mode is enabled.
+    if ((ioRead8(ITU_BUTTON_REG) & ITU_BUTTON0) != 0) {
+        safeMode = true;
+    }
 #endif
+    if (safeMode) {
+        printf("SAFE MODE ENABLED. Loading defaults...\n");
+    }
 	//    root.add_child(this); // make ourselves visible in the browser
 }
 
@@ -59,7 +71,7 @@ ConfigManager :: ~ConfigManager()
     stores.clear_list();
 
     ConfigPage *p;
-    for(int n = 0; n < stores.get_elements();n++) {
+    for(int n = 0; n < pages.get_elements();n++) {
         p = (ConfigPage *)pages[n];
         delete p;
     }
@@ -155,6 +167,17 @@ void ConfigManager :: add_custom_store(ConfigStore *cfg)
 void ConfigManager :: remove_store(ConfigStore *cfg)
 {
     stores.remove(cfg);
+}
+
+ConfigStore *ConfigManager :: find_store(const char *storename)
+{
+    for(int i=0; i < stores.get_elements(); i++) {
+        ConfigStore *st = stores[i];
+        if (strcasecmp(st->get_store_name(), storename) == 0) {
+            return st;
+        }
+    }
+    return NULL;
 }
 
 //   ===================
@@ -255,7 +278,15 @@ int ConfigStore :: pack(uint8_t *b, int remain)
 
 void ConfigStore :: effectuate()
 {
-    printf("Calling Effectuate for %d objects.\n", objects.get_elements());
+    if (objects.get_elements() == 0) {
+        staleEffect = false;
+        return;
+    }
+    if (!staleEffect) {
+        printf("Effectuate for %s not needed; not stale.\n", get_store_name());
+        return;
+    }
+    printf("Calling Effectuate on %s for %d objects.\n", get_store_name(), objects.get_elements());
     for(int i=0; i<objects.get_elements(); i++) {
         ConfigurableObject *obj = objects[i];
         if(obj) {
@@ -347,6 +378,18 @@ ConfigItem *ConfigStore :: find_item(uint8_t id)
     return NULL;
 }
 
+ConfigItem *ConfigStore :: find_item(const char *str)
+{
+    ConfigItem *i;
+    for(int n = 0;n < items.get_elements(); n++) {
+    	i = items[n];
+        if(strcasecmp(i->definition->item_text, str) == 0) {
+            return i;
+        }
+    }
+    return NULL;
+}
+
 void ConfigStore :: set_change_hook(uint8_t id, t_change_hook hook)
 {
     ConfigItem *i = find_item(id);
@@ -399,7 +442,7 @@ void ConfigStore :: set_value(uint8_t id, int value)
     }
 }
 
-void ConfigStore :: set_string(uint8_t id, char *s)
+void ConfigStore :: set_string(uint8_t id, const char *s)
 {
     ConfigItem *i = find_item(id);
     if(i) {
@@ -413,7 +456,7 @@ void ConfigStore :: dump(void)
     for(int n = 0; n < items.get_elements(); n++) {
     	i = items[n];
         printf("ID %02x: ", i->definition->id);
-        if(i->definition->type == CFG_TYPE_STRING) {
+        if ((i->definition->type == CFG_TYPE_STRING) || (i->definition->type ==CFG_TYPE_STRFUNC)) {
             printf("%s = '%s'\n", i->definition->item_text, i->string);
         } else if(i->definition->type == CFG_TYPE_ENUM) {
             printf("%s = %s\n", i->definition->item_text, i->definition->items[i->value]);
@@ -461,7 +504,7 @@ ConfigItem :: ConfigItem(ConfigStore *s, t_cfg_definition *d)
 	hook = NULL;
 	definition = d;
     store = s;
-    if ((d->type == CFG_TYPE_STRING)||(d->type == CFG_TYPE_INFO)) {
+    if ((d->type == CFG_TYPE_STRING)||(d->type == CFG_TYPE_INFO)||(d->type == CFG_TYPE_STRFUNC)) {
         string = new char[d->max+1];
     } else {
         string = NULL;
@@ -478,11 +521,11 @@ ConfigItem :: ~ConfigItem()
 
 void ConfigItem :: reset(void)
 {
-    if (definition->type == CFG_TYPE_STRING) {
-        strncpy(string, (char *)definition->def, definition->max);
+    if ((definition->type == CFG_TYPE_STRING) || (definition->type == CFG_TYPE_STRFUNC)) {
+        strncpy(string, (const char *)definition->def, definition->max);
         value = 0;
     } else {
-        value = definition->def;
+        value = (int)definition->def;
     }
 }
 
@@ -509,6 +552,7 @@ void ConfigItem :: unpack(uint8_t *buffer, int len)
                 value = definition->def;
             break;
         case CFG_TYPE_STRING:
+        case CFG_TYPE_STRFUNC:
             if(field > definition->max)
                 field = definition->max;
             strncpy(string, (char *)buffer, field);
@@ -553,6 +597,7 @@ int ConfigItem :: pack(uint8_t *buffer, int len)
             *(buffer++) = (uint8_t)(value >> 0);
             return 4;
         case CFG_TYPE_STRING:
+        case CFG_TYPE_STRFUNC:
 //            printf("String %s = %s\n", definition->item_text, string);
             if(2+strlen(string) > len) {
                 printf("String doesn't fit.\n");
@@ -588,6 +633,7 @@ const char *ConfigItem :: get_display_string(char *buffer, int width)
             sprintf(buf, definition->item_format, definition->items[value]);
             break;
         case CFG_TYPE_STRING:
+        case CFG_TYPE_STRFUNC:
         case CFG_TYPE_INFO:
             sprintf(buf, definition->item_format, string);
             break;
@@ -655,8 +701,11 @@ void ConfigItem :: setString(const char *s)
 {
     if(this->string) {
         strncpy(this->string, s, this->definition->max);
-        this->string[this->definition->max - 1] = 0;
-        if (definition->type == CFG_TYPE_STRING) {
+        this->string[this->definition->max] = 0;  // Safe since the "string" buffer is max+1 (see ConfigItem constructor)
+        if (strlen(s) > this->definition->max) {
+            this->string[this->definition->max - 1] = '*';  // Indicate string was truncated
+        }
+        if ((definition->type == CFG_TYPE_STRING) || (definition->type == CFG_TYPE_STRFUNC)) {
             setChanged();
         }
     }
